@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+requests
+yfinance
+python-dotenv
+openai
+pytest
+httpx
+sqlalchemy
+apscheduler

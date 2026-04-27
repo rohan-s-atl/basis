@@ -1,0 +1,202 @@
+import json
+from collections import defaultdict
+
+from sqlalchemy.orm import Session
+
+from app.db.models import EventRecord, SignalBacktest
+from app.repositories.backtest_repository import list_signal_backtests, upsert_signal_backtest
+from app.repositories.event_repository import list_recent_events
+from app.services.feature_service import build_feature_vector, score_signal_quality
+from app.services.market_service import fetch_price
+
+_ACTIONABLE_RETURN_THRESHOLD_PCT = 0.05
+
+
+def run_backtest(db: Session, limit: int = 100) -> dict:
+    evaluated: list[SignalBacktest] = []
+    skipped = 0
+
+    for event in list_recent_events(db, limit=limit):
+        if event.impact_direction == "neutral":
+            skipped += 1
+            continue
+
+        sectors = _parse_json_list(event.affected_sectors)
+        assets = _parse_assets(event.assets_json, event.mapped_assets)
+
+        if not assets:
+            skipped += 1
+            continue
+
+        for asset in assets:
+            symbol = str(asset.get("symbol", "")).upper()
+            entry_price = _safe_float(asset.get("price")) or event.price_at_event
+            if not symbol or not entry_price:
+                skipped += 1
+                continue
+
+            try:
+                current = fetch_price(symbol)
+                exit_price = float(current["price"])
+            except Exception:
+                skipped += 1
+                continue
+
+            return_pct = ((exit_price - float(entry_price)) / float(entry_price)) * 100
+            correct = _is_signal_correct(event.impact_direction, return_pct)
+            features = build_feature_vector(
+                event,
+                symbol=symbol,
+                entry_price=float(entry_price),
+                exit_price=exit_price,
+                return_pct=return_pct,
+                sectors=sectors,
+            )
+            ml_score = score_signal_quality(features)
+
+            evaluated.append(
+                upsert_signal_backtest(
+                    db,
+                    article_hash=event.article_hash,
+                    symbol=symbol,
+                    horizon="mark_to_market",
+                    event_type=event.event_type,
+                    affected_sectors=json.dumps(sectors),
+                    expected_direction=event.impact_direction,
+                    entry_price=float(entry_price),
+                    exit_price=exit_price,
+                    return_pct=return_pct,
+                    correct=correct,
+                    confidence=event.confidence,
+                    severity=event.severity,
+                    ml_score=ml_score,
+                    feature_vector=json.dumps(features),
+                )
+            )
+
+    return build_backtest_summary(evaluated or list_signal_backtests(db), skipped=skipped)
+
+
+def get_backtest_summary(db: Session) -> dict:
+    return build_backtest_summary(list_signal_backtests(db), skipped=0)
+
+
+def build_backtest_summary(records: list[SignalBacktest], skipped: int = 0) -> dict:
+    total = len(records)
+    actionable = [record for record in records if abs(record.return_pct) >= _ACTIONABLE_RETURN_THRESHOLD_PCT]
+    flat = total - len(actionable)
+    correct = sum(1 for record in actionable if record.correct)
+    avg_return = sum(record.return_pct for record in records) / total if total else 0.0
+    avg_ml_score = sum(record.ml_score for record in records) / total if total else 0.0
+
+    by_event_type = _group_accuracy(records, "event_type")
+    by_symbol = _group_accuracy(records, "symbol")
+    by_severity = _group_accuracy(records, "severity")
+
+    return {
+        "total_signals": total,
+        "actionable_signals": len(actionable),
+        "flat_signals": flat,
+        "correct": correct,
+        "accuracy_pct": round((correct / len(actionable)) * 100, 1) if actionable else 0.0,
+        "avg_return_pct": round(avg_return, 3),
+        "avg_ml_score": round(avg_ml_score, 4),
+        "skipped": skipped,
+        "by_event_type": by_event_type,
+        "by_symbol": by_symbol,
+        "by_severity": by_severity,
+        "top_signals": [_serialize_record(record) for record in sorted(records, key=lambda r: r.ml_score, reverse=True)[:10]],
+        "recent": [_serialize_record(record) for record in records[:10]],
+    }
+
+
+def _group_accuracy(records: list[SignalBacktest], attr: str) -> dict[str, dict]:
+    groups: dict[str, list[SignalBacktest]] = defaultdict(list)
+    for record in records:
+        groups[str(getattr(record, attr))].append(record)
+
+    return {
+        key: {
+            "total": len(items),
+            "actionable": len([item for item in items if abs(item.return_pct) >= _ACTIONABLE_RETURN_THRESHOLD_PCT]),
+            "flat": len([item for item in items if abs(item.return_pct) < _ACTIONABLE_RETURN_THRESHOLD_PCT]),
+            "correct": sum(
+                1
+                for item in items
+                if abs(item.return_pct) >= _ACTIONABLE_RETURN_THRESHOLD_PCT and item.correct
+            ),
+            "accuracy_pct": _group_accuracy_pct(items),
+            "avg_return_pct": round(sum(item.return_pct for item in items) / len(items), 3),
+            "avg_ml_score": round(sum(item.ml_score for item in items) / len(items), 4),
+        }
+        for key, items in groups.items()
+    }
+
+
+def _serialize_record(record: SignalBacktest) -> dict:
+    return {
+        "symbol": record.symbol,
+        "horizon": record.horizon,
+        "event_type": record.event_type,
+        "expected_direction": record.expected_direction,
+        "entry_price": record.entry_price,
+        "exit_price": record.exit_price,
+        "return_pct": round(record.return_pct, 3),
+        "correct": record.correct,
+        "outcome_status": _outcome_status(record),
+        "confidence": record.confidence,
+        "severity": record.severity,
+        "ml_score": record.ml_score,
+        "evaluated_at": record.evaluated_at.isoformat() if record.evaluated_at else None,
+    }
+
+
+def _parse_assets(assets_json: str, mapped_assets: str) -> list[dict]:
+    try:
+        assets = json.loads(assets_json) if assets_json else []
+        if isinstance(assets, list) and assets:
+            return [asset for asset in assets if isinstance(asset, dict)]
+    except Exception:
+        pass
+
+    return [{"symbol": symbol} for symbol in _parse_json_list(mapped_assets)]
+
+
+def _parse_json_list(value: str) -> list[str]:
+    try:
+        parsed = json.loads(value) if value else []
+        if isinstance(parsed, list):
+            return [str(item) for item in parsed]
+    except Exception:
+        pass
+    return []
+
+
+def _safe_float(value: object) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_signal_correct(direction: str, return_pct: float) -> bool:
+    if direction == "positive":
+        return return_pct > 0
+    if direction == "negative":
+        return return_pct < 0
+    return abs(return_pct) < 0.25
+
+
+def _outcome_status(record: SignalBacktest) -> str:
+    if abs(record.return_pct) < _ACTIONABLE_RETURN_THRESHOLD_PCT:
+        return "flat"
+    return "correct" if record.correct else "incorrect"
+
+
+def _group_accuracy_pct(items: list[SignalBacktest]) -> float:
+    actionable = [item for item in items if abs(item.return_pct) >= _ACTIONABLE_RETURN_THRESHOLD_PCT]
+    if not actionable:
+        return 0.0
+
+    correct = sum(1 for item in actionable if item.correct)
+    return round((correct / len(actionable)) * 100, 1)

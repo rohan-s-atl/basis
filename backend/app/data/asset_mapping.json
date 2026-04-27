@@ -1,0 +1,66 @@
+{
+  "metadata": {
+    "description": "Default asset mapping taxonomy for macro event intelligence. This file is configuration, not application logic, so market assumptions can be reviewed and changed without code edits.",
+    "research_basis": [
+      {
+        "source": "State Street SPDR S&P 500 ETF Trust",
+        "url": "https://www.ssga.com/us/en/etfs/capabilities/spdr-core-equity-etfs/spy-sp-500",
+        "rationale": "SPY is used as the broad U.S. equity market proxy because it tracks the S&P 500."
+      },
+      {
+        "source": "State Street Select Sector SPDR ETFs",
+        "url": "https://stockanalysis.com/list/sector-etfs/",
+        "rationale": "XLE, XLK, and XLF are widely used sector ETF proxies for energy, technology, and financials."
+      },
+      {
+        "source": "Invesco QQQ ETF",
+        "url": "https://www.invesco.com/us/financial-products/etfs/product-detail?audienceType=Investor&productId=ETF-QQQ",
+        "rationale": "QQQ is used as a large-cap growth and technology-sensitive proxy because it tracks the Nasdaq-100."
+      },
+      {
+        "source": "iShares TIPS Bond ETF",
+        "url": "https://www.ishares.com/us/products/239467/ishares-tips-bond-etf",
+        "rationale": "TIP is used as an inflation-linked bond proxy because it tracks U.S. Treasury inflation-protected securities."
+      }
+    ]
+  },
+  "keyword_rules": [
+    {
+      "keywords": ["oil", "crude", "energy", "opec"],
+      "assets": ["XLE", "USO"]
+    },
+    {
+      "keywords": ["conflict", "war", "invasion", "sanction"],
+      "assets": ["XLE", "USO", "GLD"]
+    },
+    {
+      "keywords": ["interest rate", "fed", "federal reserve", "central bank"],
+      "assets": ["TLT", "XLF", "QQQ"]
+    },
+    {
+      "keywords": ["inflation", "cpi", "ppi"],
+      "assets": ["TIP", "GLD", "SPY", "QQQ"]
+    },
+    {
+      "keywords": ["technology", "semiconductor", "ai", "software"],
+      "assets": ["QQQ", "XLK"]
+    }
+  ],
+  "event_assets": {
+    "geopolitical_conflict": ["XLE", "USO", "GLD"],
+    "inflation": ["TIP", "GLD", "SPY", "QQQ"],
+    "interest_rate_change": ["TLT", "XLF", "QQQ"],
+    "economic_data": ["SPY", "QQQ"],
+    "corporate_earnings": ["SPY", "QQQ"],
+    "supply_shock": ["XLE", "USO", "DBC"],
+    "general_market": ["SPY"]
+  },
+  "sector_assets": {
+    "energy": ["XLE", "USO"],
+    "technology": ["QQQ", "XLK"],
+    "financials": ["XLF"],
+    "airlines": ["JETS"],
+    "commodities": ["DBC", "GLD"],
+    "broad_market": ["SPY", "QQQ"]
+  }
+}

@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+pytest-cache-files-*/
+.env
+.venv/
+venv/
+node_modules/
+*.tsbuildinfo
+dist/
+build/
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+backend/storage/
+frontend/dist/

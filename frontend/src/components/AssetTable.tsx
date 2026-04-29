@@ -48,7 +48,7 @@ function AssetTableContent({
             return (
               <div
                 key={row.symbol}
-                className={`grid min-h-[62px] grid-cols-[0.75fr_0.85fr_1fr_1.05fr_1fr] items-center border-l-2 border-t border-t-quant-line bg-quant-panel2/80 px-4 text-sm transition hover:bg-quant-panel2 ${directionBorder(row.direction)}`}
+                className={`grid min-h-[3.875rem] grid-cols-[0.75fr_0.85fr_1fr_1.05fr_1fr] items-center border-l-2 border-t border-t-quant-line bg-quant-panel2/80 px-4 text-sm transition hover:bg-quant-panel2 ${directionBorder(row.direction)}`}
               >
                 <div>
                   <strong className="block text-sm text-quant-text">{row.symbol}</strong>
@@ -348,7 +348,7 @@ function LargePriceChart({
   const labels = buildTimeLabels(timestamps, range);
 
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="h-[360px] w-full" role="img" aria-label={`${symbol} ${range} price chart`}>
+    <svg viewBox={`0 0 ${width} ${height}`} className="h-[22.5rem] w-full" role="img" aria-label={`${symbol} ${range} price chart`}>
       <defs>
         <linearGradient id={`area-${symbol}`} x1="0" x2="0" y1="0" y2="1">
           <stop offset="0%" stopColor={positive ? "#00E676" : "#FF5252"} stopOpacity="0.22" />

@@ -63,8 +63,8 @@ export function PredictionsPanel() {
             <Metric label="Model" value={summary?.model_version ?? "v1"} icon />
           </div>
 
-          <div className="grid min-h-[360px] grid-cols-[0.82fr_1.18fr] gap-3">
-            <div className="scrollbar-quant grid h-full max-h-[430px] content-start gap-2 overflow-auto pr-1">
+          <div className="grid min-h-[22.5rem] grid-cols-[0.82fr_1.18fr] gap-3">
+            <div className="scrollbar-quant grid h-full max-h-[26.875rem] content-start gap-2 overflow-auto pr-1">
               {predictions.slice(0, 10).map((prediction, index) => (
                 <button
                   key={`${prediction.symbol}-${prediction.title}-${index}`}

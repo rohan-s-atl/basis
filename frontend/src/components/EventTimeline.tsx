@@ -26,7 +26,7 @@ function Row({ event, index, onSelectEvent }: RowProps) {
     <button
       onClick={() => onSelectEvent?.(event)}
       title="Click to view full event intelligence in the detail panel"
-      className="grid w-full grid-cols-[32px_minmax(0,1fr)_110px_132px] items-center gap-3 rounded-lg border border-quant-line bg-quant-panel2 px-3 py-2 text-left transition hover:border-quant-green/40 hover:bg-quant-panel2/80"
+      className="grid w-full grid-cols-[32px_minmax(0,1fr)_minmax(80px,110px)_minmax(110px,132px)] items-center gap-3 rounded-lg border border-quant-line bg-quant-panel2 px-3 py-2 text-left transition hover:border-quant-green/40 hover:bg-quant-panel2/80"
     >
       <div className="grid h-7 w-7 place-items-center rounded-md border border-quant-line bg-quant-bg text-xs font-black text-quant-muted">
         {index + 1}
@@ -120,7 +120,7 @@ export function EventTimeline({ events, onSelectEvent }: EventTimelineProps) {
             </button>
           </div>
         </div>
-        <div className="scrollbar-quant grid max-h-[150px] gap-1.5 overflow-auto pr-1">
+        <div className="scrollbar-quant grid max-h-[9.375rem] gap-1.5 overflow-auto pr-1">
           {rankedEvents.length === 0 ? empty : rankedEvents.map((event, index) => (
             <Row key={`${event.title}-${index}`} event={event} index={index} onSelectEvent={onSelectEvent} />
           ))}

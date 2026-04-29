@@ -58,7 +58,7 @@ export function MacroSituations({ clusters, onClusterClick }: MacroSituationsPro
             <Maximize2 size={13} />
           </button>
         </div>
-        <div className="scrollbar-quant grid max-h-[190px] gap-2 overflow-auto pr-1">
+        <div className="scrollbar-quant grid max-h-[11.875rem] gap-2 overflow-auto pr-1">
           {clusters.slice(0, 5).map((cluster) => (
             <ClusterItem key={cluster.id} cluster={cluster} onClusterClick={onClusterClick} />
           ))}

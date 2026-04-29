@@ -165,11 +165,11 @@ function App() {
   }
 
   return (
-    <main className="h-screen overflow-hidden bg-quant-bg text-quant-text">
+    <main className="h-screen overflow-x-auto overflow-y-hidden bg-quant-bg text-quant-text">
       <div className="pointer-events-none fixed inset-0 bg-[linear-gradient(rgba(139,148,158,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(139,148,158,0.045)_1px,transparent_1px)] bg-[size:48px_48px]" />
 
-      <section className="relative z-10 mx-auto flex h-screen w-[calc(100%-24px)] flex-col py-3">
-        <header className="quant-panel mb-2 flex h-[64px] shrink-0 items-center justify-between gap-4 px-4 py-3">
+      <section className="relative z-10 mx-auto flex h-screen min-w-[900px] w-[calc(100%-24px)] flex-col py-3">
+        <header className="quant-panel mb-2 flex min-h-16 shrink-0 flex-wrap items-center justify-between gap-4 px-4 py-3">
           <div className="flex min-w-0 items-center gap-3">
             <div className="grid h-9 w-9 place-items-center rounded-lg border border-quant-green/40 bg-quant-green/10 text-quant-green">
               <BrainCircuit size={20} />
@@ -234,7 +234,7 @@ function App() {
           </div>
         )}
 
-        <section className="grid min-h-0 flex-1 grid-cols-[minmax(300px,0.82fr)_minmax(760px,1.9fr)_minmax(360px,0.96fr)] gap-3">
+        <section className="grid min-h-0 flex-1 grid-cols-[minmax(220px,0.82fr)_minmax(0,1.9fr)_minmax(260px,0.96fr)] gap-3">
           <div className="grid min-h-0 grid-rows-[minmax(0,1fr)_auto_auto] gap-3">
             <EventFeed
               events={filteredEvents}
@@ -347,7 +347,7 @@ function App() {
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="quant-panel flex h-[64px] items-center gap-3 px-4">
+    <div className="quant-panel flex h-16 items-center gap-3 px-4">
       <div className="grid h-8 w-8 place-items-center rounded-lg border border-quant-green/35 bg-quant-green/10 text-quant-green">
         <Activity size={16} />
       </div>

@@ -39,7 +39,7 @@ function SectorGrid({ scores, cols, activeSector, onSectorClick, onClickClose }:
                 ? `Clear ${formatLabel(sector)} sector filter`
                 : `Filter events by ${formatLabel(sector)} - ${count} event${count !== 1 ? "s" : ""}`
             }
-            className={`min-h-[86px] rounded-lg border p-3 text-left transition hover:brightness-110 ${
+            className={`min-h-[5.375rem] rounded-lg border p-3 text-left transition hover:brightness-110 ${
               isActive
                 ? "border-quant-green/60 ring-1 ring-quant-green/20"
                 : isDisabled

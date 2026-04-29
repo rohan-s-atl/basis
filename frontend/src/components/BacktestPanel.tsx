@@ -73,7 +73,7 @@ export function BacktestPanel() {
 
           <div className="rounded-lg border border-quant-line bg-quant-panel2 p-3">
             <p className="quant-eyebrow mb-2">Top ranked signals</p>
-            <div className="scrollbar-quant grid max-h-[180px] gap-2 overflow-auto pr-1">
+            <div className="scrollbar-quant grid max-h-[11.25rem] gap-2 overflow-auto pr-1">
               {summary.top_signals.slice(0, 6).map((signal) => (
                 <div key={`${signal.symbol}-${signal.event_type}-${signal.evaluated_at}`} className="rounded-md border border-quant-line bg-quant-bg/60 p-2">
                   <div className="mb-1 flex items-center justify-between gap-2">

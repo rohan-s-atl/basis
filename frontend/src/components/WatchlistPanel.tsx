@@ -74,7 +74,7 @@ export function WatchlistPanel({ events, embedded = false }: WatchlistPanelProps
         </div>
       </div>
 
-      <div className="scrollbar-quant grid max-h-[112px] gap-2 overflow-auto pr-1">
+      <div className="scrollbar-quant grid max-h-28 gap-2 overflow-auto pr-1">
         {impact.impacted_assets.length === 0 ? (
           <div className="rounded-lg border border-quant-line bg-quant-panel2 p-3 text-sm text-quant-muted">
             No watchlist symbols currently match active macro events.

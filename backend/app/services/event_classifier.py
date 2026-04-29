@@ -55,6 +55,7 @@ def classify_event(article: dict) -> dict:
     if not settings.openai_api_key:
         return {
             **FALLBACK_CLASSIFICATION,
+            "confidence": 0.5,
             "reasoning": "OpenAI API key missing",
         }
 

@@ -13,10 +13,12 @@ def ensure_sqlite_parent_directory(database_url: str) -> None:
         return
 
     parsed = urlparse(database_url)
-    database_path = Path(parsed.path.lstrip("/"))
+    database_path = Path(parsed.path)
     if database_path.parent != Path("."):
         database_path.parent.mkdir(parents=True, exist_ok=True)
 
+
+ensure_sqlite_parent_directory(settings.database_url)
 
 engine = create_engine(
     settings.database_url,

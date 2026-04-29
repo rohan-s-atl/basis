@@ -152,6 +152,8 @@ class BacktestSummary(BaseModel):
 
 
 class AssetPrediction(BaseModel):
+    model_config = {"protected_namespaces": ()}
+
     symbol: str
     title: str
     event_type: str
@@ -172,6 +174,8 @@ class AssetPrediction(BaseModel):
 
 
 class PredictionSummary(BaseModel):
+    model_config = {"protected_namespaces": ()}
+
     model_version: str
     count: int
     predictions: list[AssetPrediction]

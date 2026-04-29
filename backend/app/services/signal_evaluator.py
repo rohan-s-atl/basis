@@ -29,7 +29,8 @@ def evaluate_signals(db: Session) -> int:
     for record in pending:
         try:
             mapped_assets = json.loads(record.mapped_assets or "[]")
-        except Exception:
+        except Exception as exc:
+            logger.warning("Skipping record %s: failed to parse mapped_assets: %s", record.id, exc)
             continue
 
         if not mapped_assets or record.price_at_event is None:
@@ -40,7 +41,8 @@ def evaluate_signals(db: Session) -> int:
             try:
                 market_data = fetch_price(symbol)
                 prices.append(float(market_data["price"]))
-            except Exception:
+            except Exception as exc:
+                logger.warning("Failed to fetch price for %s during signal evaluation: %s", symbol, exc)
                 continue
 
         if not prices:

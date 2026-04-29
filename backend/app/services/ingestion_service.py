@@ -63,7 +63,8 @@ def ingest_events(db: Session) -> list[dict]:
                     symbol=str(market_data["symbol"]),
                     price=price,
                 )
-            except Exception:
+            except Exception as exc:
+                logger.warning("Failed to fetch price for %s during ingestion: %s", symbol, exc)
                 continue
 
         avg_price = sum(prices) / len(prices) if prices else None

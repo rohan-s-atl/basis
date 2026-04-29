@@ -1,13 +1,16 @@
 import json
+import logging
 from collections import defaultdict
 
 from sqlalchemy.orm import Session
 
-from app.db.models import EventRecord, SignalBacktest
+from app.db.models import SignalBacktest
 from app.repositories.backtest_repository import list_signal_backtests, upsert_signal_backtest
 from app.repositories.event_repository import list_recent_events
 from app.services.feature_service import build_feature_vector, score_signal_quality
 from app.services.market_service import fetch_price
+
+logger = logging.getLogger(__name__)
 
 _ACTIONABLE_RETURN_THRESHOLD_PCT = 0.05
 
@@ -38,7 +41,8 @@ def run_backtest(db: Session, limit: int = 100) -> dict:
             try:
                 current = fetch_price(symbol)
                 exit_price = float(current["price"])
-            except Exception:
+            except Exception as exc:
+                logger.warning("Failed to fetch price for %s during backtest: %s", symbol, exc)
                 skipped += 1
                 continue
 

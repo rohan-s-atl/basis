@@ -2,10 +2,11 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.schemas import TrainingExample
+from app.schemas import TrainingDataset
 from app.services.training_data_service import (
     export_training_dataset,
-    get_confidence_bucket_metrics,
+    get_confidence_analysis,
+    get_dataset_stats,
     get_train_test_split,
     validate_dataset,
 )
@@ -13,11 +14,11 @@ from app.services.training_data_service import (
 router = APIRouter(tags=["training-data"])
 
 
-@router.get("/export-training-data", response_model=list[TrainingExample])
+@router.get("/export-training-data", response_model=TrainingDataset)
 def export_training_data(
     limit: int = 10_000,
     db: Session = Depends(get_db),
-) -> list[dict]:
+) -> dict:
     return export_training_dataset(db, limit=min(limit, 50_000))
 
 
@@ -36,7 +37,15 @@ def read_train_test_split(
 
 @router.get("/training-data/confidence-buckets")
 def read_confidence_buckets(db: Session = Depends(get_db)) -> dict:
-    return get_confidence_bucket_metrics(db)
+    return get_confidence_analysis(db)
+
+
+@router.get("/training-data/stats")
+def read_dataset_stats(
+    limit: int = 10_000,
+    db: Session = Depends(get_db),
+) -> dict:
+    return get_dataset_stats(db, limit=min(limit, 50_000))
 
 
 @router.get("/training-data/validation")

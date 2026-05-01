@@ -59,6 +59,7 @@ def compute_outcomes(
                     prediction_id=prediction.id,
                     actual_return=round(actual_return, 8),
                     raw_return=round(actual_return, 8),
+                    return_magnitude=round(abs(actual_return), 8),
                     label=label,
                     filtered_label=label,
                     threshold_used=threshold,

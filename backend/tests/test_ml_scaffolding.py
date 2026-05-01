@@ -8,7 +8,8 @@ from app.services.outcome_service import compute_outcomes
 from app.services.prediction_pipeline import run_prediction_pipeline
 from app.services.training_data_service import (
     export_training_dataset,
-    get_confidence_bucket_metrics,
+    get_confidence_analysis,
+    get_dataset_stats,
     get_train_test_split,
     validate_dataset,
 )
@@ -73,25 +74,35 @@ def test_prediction_pipeline_stores_features_and_exports_labeled_dataset(monkeyp
     assert outcome.label == 1
     assert outcome.filtered_label == 1
     assert outcome.actual_return == 0.1
-    assert dataset[0]["label"] == 1
-    assert dataset[0]["features"]["event_event_type_encoded"] == 2
-    assert dataset[0]["features"]["market_return_1d"] > 0
-    assert dataset[0]["features"]["market_return_5d"] == 0.0
-    assert dataset[0]["features"]["market_return_10d"] == 0.0
-    assert "derived_sentiment_x_sector_sensitivity" in dataset[0]["features"]
-    assert "derived_event_type_asset_class_interaction" in dataset[0]["features"]
-    assert "derived_historical_accuracy_of_event_type" in dataset[0]["features"]
-    assert "derived_rolling_accuracy_of_asset_predictions" in dataset[0]["features"]
-    assert all(isinstance(value, (int, float)) for value in dataset[0]["features"].values())
+    assert outcome.return_magnitude == 0.1
+    assert dataset["labels"] == [1]
+    feature_map = dict(zip(dataset["feature_names"], dataset["features"][0]))
+    assert feature_map["event_event_type_encoded"] == 2
+    assert feature_map["market_return_1d"] > 0
+    assert feature_map["market_return_5d"] == 0.0
+    assert feature_map["market_return_10d"] == 0.0
+    assert feature_map["market_sector_return_5d"] == 0.0
+    assert feature_map["market_sector_return_10d"] == 0.0
+    assert feature_map["market_relative_strength_5d"] == 0.0
+    assert "derived_sentiment_x_sector_sensitivity" in feature_map
+    assert "derived_event_type_asset_class_interaction" in feature_map
+    assert "derived_historical_accuracy_of_event_type" in feature_map
+    assert "derived_rolling_accuracy_of_asset_predictions" in feature_map
+    assert "derived_event_asset_avg_return" in feature_map
+    assert "derived_event_asset_accuracy" in feature_map
+    assert feature_map["outcome_return_magnitude"] == 0.1
+    assert all(isinstance(value, (int, float)) for value in dataset["features"][0])
 
     split = get_train_test_split(db_session)
-    buckets = get_confidence_bucket_metrics(db_session)
+    buckets = get_confidence_analysis(db_session)
     report = validate_dataset(db_session)
+    stats = get_dataset_stats(db_session)
 
-    assert split["train"] == []
-    assert split["test"] == dataset
+    assert split["train"]["labels"] == []
+    assert split["test"]["labels"] == [1]
     assert buckets["0.8+"]["samples"] == 1
     assert report["num_samples"] == 1
+    assert stats["num_samples"] == 1
 
 
 def test_compute_outcomes_filters_noise_from_training_dataset(monkeypatch) -> None:
@@ -143,4 +154,8 @@ def test_compute_outcomes_filters_noise_from_training_dataset(monkeypatch) -> No
     assert outcome.label is None
     assert outcome.filtered_label is None
     assert outcome.threshold_used == 0.002
-    assert dataset == []
+    assert outcome.return_magnitude == 0.001
+    assert dataset["features"] == []
+    assert dataset["labels"] == []
+    assert dataset["feature_names"] == []
+    assert dataset["metadata"]["num_samples"] == 0

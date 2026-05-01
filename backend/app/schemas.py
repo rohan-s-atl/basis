@@ -181,6 +181,14 @@ class PredictionSummary(BaseModel):
     predictions: list[AssetPrediction]
 
 
-class TrainingExample(BaseModel):
-    features: dict[str, object]
-    label: int
+class TrainingDatasetMetadata(BaseModel):
+    num_samples: int
+    class_balance: dict[str, float | int]
+    feature_count: int
+
+
+class TrainingDataset(BaseModel):
+    features: list[list[float]]
+    labels: list[int]
+    feature_names: list[str]
+    metadata: TrainingDatasetMetadata

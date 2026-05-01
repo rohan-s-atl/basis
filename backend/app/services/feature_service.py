@@ -130,17 +130,26 @@ def build_market_features(
     asset: str,
     price: float,
     history: list[float] | None = None,
+    sector_return_5d: float | None = None,
+    sector_return_10d: float | None = None,
 ) -> dict[str, float | int]:
     clean_history = [float(value) for value in history or [] if value is not None]
     asset_class = asset_class_for_symbol(asset)
     rolling_volatility = _rolling_volatility(clean_history, window=5)
+    return_5d = _return_over_period(clean_history, 5)
+    return_10d = _return_over_period(clean_history, 10)
+    effective_sector_return_5d = return_5d if sector_return_5d is None else sector_return_5d
+    effective_sector_return_10d = return_10d if sector_return_10d is None else sector_return_10d
     return {
         "asset_encoded": encode_asset(asset),
         "asset_class_encoded": encode_asset_class(asset_class),
         "price": round(float(price), 4),
         "return_1d": round(_return_over_period(clean_history, 1), 6),
-        "return_5d": round(_return_over_period(clean_history, 5), 6),
-        "return_10d": round(_return_over_period(clean_history, 10), 6),
+        "return_5d": round(return_5d, 6),
+        "return_10d": round(return_10d, 6),
+        "sector_return_5d": round(effective_sector_return_5d, 6),
+        "sector_return_10d": round(effective_sector_return_10d, 6),
+        "relative_strength_5d": round(return_5d - effective_sector_return_5d, 6),
         "rolling_volatility": round(rolling_volatility, 6),
         "volatility": round(rolling_volatility, 6),
         "history_points": len(clean_history),
@@ -156,6 +165,8 @@ def build_derived_features(
     sector_sensitivity: float,
     historical_accuracy_of_event_type: float,
     rolling_accuracy_of_asset_predictions: float,
+    event_asset_avg_return: float,
+    event_asset_accuracy: float,
 ) -> dict[str, float | int]:
     sentiment = float(event_features.get("sentiment", 0.0))
     severity = float(event_features.get("severity", 0.0))
@@ -170,6 +181,8 @@ def build_derived_features(
         "event_type_asset_class_interaction": event_type_encoded * asset_class_encoded,
         "historical_accuracy_of_event_type": round(historical_accuracy_of_event_type, 6),
         "rolling_accuracy_of_asset_predictions": round(rolling_accuracy_of_asset_predictions, 6),
+        "event_asset_avg_return": round(event_asset_avg_return, 6),
+        "event_asset_accuracy": round(event_asset_accuracy, 6),
         "severity_x_volatility": round(severity * volatility, 6),
     }
 
@@ -204,6 +217,14 @@ def asset_class_for_symbol(asset: str) -> str:
     return "unknown"
 
 
+def sector_symbols_for_asset(asset: str) -> list[str]:
+    asset_class = asset_class_for_symbol(asset)
+    symbols = sorted(_ASSET_CLASS_HINTS.get(asset_class, set()))
+    if symbols:
+        return symbols
+    return [asset.upper()]
+
+
 def encode_asset_class(asset_class: str) -> int:
     return _ASSET_CLASS_ENCODING.get(asset_class, _ASSET_CLASS_ENCODING["unknown"])
 
@@ -223,6 +244,13 @@ def sector_sensitivity_for_asset(asset: str, sectors: list[str]) -> float:
 
     asset_class = asset_class_for_symbol(symbol)
     return 0.5 if asset_class in sectors else 0.0
+
+
+def average_return_over_histories(histories: list[list[float]], *, periods: int) -> float:
+    returns = [_return_over_period(history, periods) for history in histories if history]
+    if not returns:
+        return 0.0
+    return sum(returns) / len(returns)
 
 
 def _direction_score(direction: str) -> float:

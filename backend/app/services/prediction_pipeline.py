@@ -11,10 +11,12 @@ from app.db.session import SessionLocal
 from app.services.baseline_scoring import score_baseline_prediction
 from app.services.event_classifier import classify_event
 from app.services.feature_service import (
+    average_return_over_histories,
     build_derived_features,
     build_event_features,
     build_market_features,
     sector_sensitivity_for_asset,
+    sector_symbols_for_asset,
     sentiment_from_classification,
     severity_to_score,
 )
@@ -141,7 +143,14 @@ def _store_predictions_for_assets(
             continue
         price = float(market_data["price"])
         history = [float(value) for value in market_data.get("history", [])]
-        market_features = build_market_features(asset=symbol, price=price, history=history)
+        sector_return_5d, sector_return_10d = _sector_return_features(symbol, history)
+        market_features = build_market_features(
+            asset=symbol,
+            price=price,
+            history=history,
+            sector_return_5d=sector_return_5d,
+            sector_return_10d=sector_return_10d,
+        )
         baseline = score_baseline_prediction(
             sentiment=float(event_features["sentiment"]),
             severity=float(event_features["severity"]),
@@ -162,6 +171,18 @@ def _store_predictions_for_assets(
             rolling_accuracy_of_asset_predictions=_rolling_accuracy_of_asset_predictions(
                 db,
                 symbol,
+                before=prediction_timestamp,
+            ),
+            event_asset_avg_return=_event_asset_avg_return(
+                db,
+                symbol,
+                event.event_type,
+                before=prediction_timestamp,
+            ),
+            event_asset_accuracy=_event_asset_accuracy(
+                db,
+                symbol,
+                event.event_type,
                 before=prediction_timestamp,
             ),
         )
@@ -253,6 +274,115 @@ def _accuracy_or_prior(labels: list[int]) -> float:
     if not labels:
         return 0.5
     return sum(labels) / len(labels)
+
+
+def _sector_return_features(asset: str, asset_history: list[float]) -> tuple[float, float]:
+    histories: list[list[float]] = []
+    for sector_symbol in sector_symbols_for_asset(asset):
+        if sector_symbol == asset.upper():
+            histories.append(asset_history)
+            continue
+        try:
+            sector_market_data = fetch_price(sector_symbol)
+            histories.append([float(value) for value in sector_market_data.get("history", [])])
+        except Exception as exc:
+            logger.debug("Sector return fetch failed for %s: %s", sector_symbol, exc)
+
+    if not histories:
+        histories = [asset_history]
+
+    return (
+        average_return_over_histories(histories, periods=5),
+        average_return_over_histories(histories, periods=10),
+    )
+
+
+def _event_asset_avg_return(
+    db: Session,
+    asset: str,
+    event_type: str,
+    *,
+    before: datetime,
+) -> float:
+    returns = [
+        float(return_value)
+        for (return_value,) in (
+            db.query(Outcome.raw_return)
+            .join(Prediction, Prediction.id == Outcome.prediction_id)
+            .join(Event, Event.id == Prediction.event_id)
+            .filter(
+                Prediction.asset == asset.upper(),
+                Event.event_type == event_type,
+                Prediction.timestamp < before,
+                Outcome.filtered_label.isnot(None),
+            )
+            .all()
+        )
+    ]
+    if returns:
+        return sum(returns) / len(returns)
+    return _global_avg_return(db, before=before)
+
+
+def _event_asset_accuracy(
+    db: Session,
+    asset: str,
+    event_type: str,
+    *,
+    before: datetime,
+) -> float:
+    labels = [
+        int(label)
+        for (label,) in (
+            db.query(Outcome.filtered_label)
+            .join(Prediction, Prediction.id == Outcome.prediction_id)
+            .join(Event, Event.id == Prediction.event_id)
+            .filter(
+                Prediction.asset == asset.upper(),
+                Event.event_type == event_type,
+                Prediction.timestamp < before,
+                Outcome.filtered_label.isnot(None),
+            )
+            .all()
+        )
+    ]
+    if labels:
+        return sum(labels) / len(labels)
+    return _global_accuracy(db, before=before)
+
+
+def _global_avg_return(db: Session, *, before: datetime) -> float:
+    returns = [
+        float(return_value)
+        for (return_value,) in (
+            db.query(Outcome.raw_return)
+            .join(Prediction, Prediction.id == Outcome.prediction_id)
+            .filter(
+                Prediction.timestamp < before,
+                Outcome.filtered_label.isnot(None),
+            )
+            .all()
+        )
+    ]
+    if not returns:
+        return 0.0
+    return sum(returns) / len(returns)
+
+
+def _global_accuracy(db: Session, *, before: datetime) -> float:
+    labels = [
+        int(label)
+        for (label,) in (
+            db.query(Outcome.filtered_label)
+            .join(Prediction, Prediction.id == Outcome.prediction_id)
+            .filter(
+                Prediction.timestamp < before,
+                Outcome.filtered_label.isnot(None),
+            )
+            .all()
+        )
+    ]
+    return _accuracy_or_prior(labels)
 
 
 def _assets_for_event(article: dict[str, Any], classification: dict[str, Any]) -> list[str]:

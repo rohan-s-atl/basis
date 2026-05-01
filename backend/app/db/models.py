@@ -145,6 +145,7 @@ class Outcome(Base):
     )
     actual_return: Mapped[float] = mapped_column(Float, nullable=False)
     raw_return: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    return_magnitude: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     label: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     filtered_label: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     threshold_used: Mapped[float] = mapped_column(Float, nullable=False, default=0.002)

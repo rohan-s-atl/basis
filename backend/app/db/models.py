@@ -1,8 +1,9 @@
 from datetime import UTC, datetime
+from uuid import UUID, uuid4
 from typing import Optional
 
-from sqlalchemy import Boolean, Float, Integer, String, Text, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import Boolean, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, Uuid
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
 
@@ -68,3 +69,82 @@ class SignalBacktest(Base):
     feature_vector: Mapped[str] = mapped_column(Text, nullable=False)
     observations: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     evaluated_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
+
+
+class Event(Base):
+    __tablename__ = "events"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    timestamp: Mapped[datetime] = mapped_column(nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    region: Mapped[str] = mapped_column(String(64), nullable=False, default="global")
+    sentiment: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    severity: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    raw_text: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str] = mapped_column(String(128), nullable=False, default="unknown")
+    model_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
+
+    predictions: Mapped[list["Prediction"]] = relationship(
+        back_populates="event",
+        cascade="all, delete-orphan",
+    )
+
+
+class Prediction(Base):
+    __tablename__ = "predictions"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    event_id: Mapped[UUID] = mapped_column(ForeignKey("events.id"), nullable=False, index=True)
+    asset: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    predicted_direction: Mapped[str] = mapped_column(String(8), nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    horizon: Mapped[str] = mapped_column(String(16), nullable=False)
+    timestamp: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC), nullable=False)
+
+    event: Mapped[Event] = relationship(back_populates="predictions")
+    feature_snapshot: Mapped[Optional["FeatureSnapshot"]] = relationship(
+        back_populates="prediction",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+    outcome: Mapped[Optional["Outcome"]] = relationship(
+        back_populates="prediction",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+
+
+class FeatureSnapshot(Base):
+    __tablename__ = "feature_snapshots"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    prediction_id: Mapped[UUID] = mapped_column(
+        ForeignKey("predictions.id"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    event_features: Mapped[dict] = mapped_column(JSON, nullable=False)
+    market_features: Mapped[dict] = mapped_column(JSON, nullable=False)
+    derived_features: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
+
+    prediction: Mapped[Prediction] = relationship(back_populates="feature_snapshot")
+
+
+class Outcome(Base):
+    __tablename__ = "outcomes"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    prediction_id: Mapped[UUID] = mapped_column(
+        ForeignKey("predictions.id"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    actual_return: Mapped[float] = mapped_column(Float, nullable=False)
+    label: Mapped[int] = mapped_column(Integer, nullable=False)
+    computed_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
+
+    prediction: Mapped[Prediction] = relationship(back_populates="outcome")

@@ -1,13 +1,18 @@
 import logging
 import threading
+from typing import Any
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import backtest, combined, events, market, news, predictions, watchlist
+try:
+    from apscheduler.schedulers.background import BackgroundScheduler
+except ModuleNotFoundError:
+    BackgroundScheduler = None
+
+from app.api import backtest, combined, events, market, news, predictions, training, watchlist
 from app.api import signals
 from app.db.init_db import init_db
 from app.db.session import SessionLocal
@@ -43,17 +48,22 @@ def _run_signal_evaluation() -> None:
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     init_db()
 
-    scheduler = BackgroundScheduler(daemon=True)
-    scheduler.add_job(_run_ingestion, "interval", minutes=15, id="ingestion")
-    scheduler.add_job(_run_signal_evaluation, "interval", hours=1, id="signal_eval")
-    scheduler.start()
+    scheduler: Any = None
+    if BackgroundScheduler is not None:
+        scheduler = BackgroundScheduler(daemon=True)
+        scheduler.add_job(_run_ingestion, "interval", minutes=15, id="ingestion")
+        scheduler.add_job(_run_signal_evaluation, "interval", hours=1, id="signal_eval")
+        scheduler.start()
+    else:
+        logger.warning("apscheduler is not installed; background jobs are disabled")
 
     # Warm caches on startup without blocking the server
     threading.Thread(target=_run_ingestion, daemon=True).start()
 
     yield
 
-    scheduler.shutdown(wait=False)
+    if scheduler is not None:
+        scheduler.shutdown(wait=False)
 
 
 app = FastAPI(
@@ -78,6 +88,7 @@ app.include_router(watchlist.router)
 app.include_router(signals.router)
 app.include_router(backtest.router)
 app.include_router(predictions.router)
+app.include_router(training.router)
 
 
 @app.get("/")

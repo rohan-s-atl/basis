@@ -9,6 +9,7 @@ from app.services.event_classifier import classify_event
 from app.services.mapping_service import map_article_to_assets
 from app.services.market_service import fetch_price
 from app.services.news_service import fetch_news
+from app.services.prediction_pipeline import run_prediction_pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,15 @@ def ingest_events(db: Session) -> list[dict]:
             assets_json=json.dumps(assets),
             price_at_event=avg_price,
         )
+        try:
+            run_prediction_pipeline(
+                article,
+                db=db,
+                classification=classification,
+                mapped_assets=mapped_symbols,
+            )
+        except Exception as exc:
+            logger.warning("Failed to persist prediction pipeline for %s: %s", article_hash, exc)
 
         response.append({
             "title": article.get("title", ""),

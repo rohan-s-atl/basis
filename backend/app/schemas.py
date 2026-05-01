@@ -179,3 +179,8 @@ class PredictionSummary(BaseModel):
     model_version: str
     count: int
     predictions: list[AssetPrediction]
+
+
+class TrainingExample(BaseModel):
+    features: dict[str, object]
+    label: int

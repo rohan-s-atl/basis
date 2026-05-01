@@ -10,6 +10,9 @@ _NEW_COLUMNS = [
     ("event_records", "price_at_evaluation", "FLOAT"),
     ("event_records", "signal_correct", "BOOLEAN"),
     ("event_records", "evaluated_at", "DATETIME"),
+    ("outcomes", "raw_return", "FLOAT NOT NULL DEFAULT 0.0"),
+    ("outcomes", "filtered_label", "INTEGER"),
+    ("outcomes", "threshold_used", "FLOAT NOT NULL DEFAULT 0.002"),
 ]
 
 

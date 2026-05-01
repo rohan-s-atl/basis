@@ -144,7 +144,10 @@ class Outcome(Base):
         index=True,
     )
     actual_return: Mapped[float] = mapped_column(Float, nullable=False)
-    label: Mapped[int] = mapped_column(Integer, nullable=False)
+    raw_return: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    label: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    filtered_label: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    threshold_used: Mapped[float] = mapped_column(Float, nullable=False, default=0.002)
     computed_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
 
     prediction: Mapped[Prediction] = relationship(back_populates="outcome")

@@ -4,6 +4,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.db.models import FeatureSnapshot, Outcome, Prediction
 from app.db.session import SessionLocal
 from app.services.market_service import fetch_price
@@ -11,11 +12,18 @@ from app.services.market_service import fetch_price
 logger = logging.getLogger(__name__)
 
 
-def compute_outcomes(*, db: Session | None = None, limit: int = 500) -> dict[str, int]:
+def compute_outcomes(
+    *,
+    db: Session | None = None,
+    limit: int = 500,
+    noise_threshold: float | None = None,
+) -> dict[str, int]:
     owns_session = db is None
     session = db or SessionLocal()
+    threshold = settings.outcome_noise_threshold if noise_threshold is None else noise_threshold
     computed = 0
     skipped = 0
+    filtered = 0
 
     try:
         predictions = _predictions_without_outcomes(session, limit=limit)
@@ -39,19 +47,28 @@ def compute_outcomes(*, db: Session | None = None, limit: int = 500) -> dict[str
                 continue
 
             actual_return = (current_price - entry_price) / entry_price
-            label = _label_prediction(prediction.predicted_direction, actual_return)
+            label = _label_prediction(
+                prediction.predicted_direction,
+                actual_return,
+                noise_threshold=threshold,
+            )
+            if label is None:
+                filtered += 1
             session.add(
                 Outcome(
                     prediction_id=prediction.id,
                     actual_return=round(actual_return, 8),
+                    raw_return=round(actual_return, 8),
                     label=label,
+                    filtered_label=label,
+                    threshold_used=threshold,
                     computed_at=datetime.now(UTC),
                 )
             )
             computed += 1
 
         session.commit()
-        return {"computed": computed, "skipped": skipped}
+        return {"computed": computed, "skipped": skipped, "filtered": filtered}
     except Exception:
         session.rollback()
         raise
@@ -79,7 +96,14 @@ def _snapshot_entry_price(snapshot: FeatureSnapshot) -> float | None:
         return None
 
 
-def _label_prediction(predicted_direction: str, actual_return: float) -> int:
+def _label_prediction(
+    predicted_direction: str,
+    actual_return: float,
+    *,
+    noise_threshold: float,
+) -> int | None:
+    if abs(actual_return) < noise_threshold:
+        return None
     if predicted_direction == "up" and actual_return > 0:
         return 1
     if predicted_direction == "down" and actual_return < 0:

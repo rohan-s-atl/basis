@@ -1,5 +1,4 @@
 import math
-from datetime import datetime
 from typing import Any
 
 from app.db.models import Event, EventRecord
@@ -25,6 +24,27 @@ _ASSET_CLASS_HINTS = {
     "airlines": {"JETS"},
     "broad_market": {"SPY", "QQQ"},
     "rates": {"TLT", "TIP"},
+}
+
+_EVENT_TYPE_ENCODING = {
+    "general_market": 0,
+    "geopolitical_conflict": 1,
+    "inflation": 2,
+    "interest_rate_change": 3,
+    "economic_data": 4,
+    "corporate_earnings": 5,
+    "supply_shock": 6,
+}
+
+_ASSET_CLASS_ENCODING = {
+    "broad_market": 0,
+    "energy": 1,
+    "commodities": 2,
+    "technology": 3,
+    "financials": 4,
+    "airlines": 5,
+    "rates": 6,
+    "unknown": 7,
 }
 
 
@@ -96,15 +116,12 @@ def sentiment_from_classification(classification: dict[str, Any]) -> float:
     return round(_IMPACT_SENTIMENT.get(direction, 0.0) * confidence, 4)
 
 
-def build_event_features(event: Event) -> dict[str, float | str]:
+def build_event_features(event: Event) -> dict[str, float | int]:
     return {
-        "event_type": event.event_type,
-        "region": event.region,
+        "event_type_encoded": encode_event_type(event.event_type),
         "sentiment": round(event.sentiment, 4),
         "severity": round(event.severity, 4),
-        "source": event.source,
-        "model_version": event.model_version,
-        "event_timestamp": _datetime_to_iso(event.timestamp),
+        "event_timestamp_unix": int(event.timestamp.timestamp()),
     }
 
 
@@ -113,12 +130,19 @@ def build_market_features(
     asset: str,
     price: float,
     history: list[float] | None = None,
-) -> dict[str, float | str | int]:
+) -> dict[str, float | int]:
     clean_history = [float(value) for value in history or [] if value is not None]
+    asset_class = asset_class_for_symbol(asset)
+    rolling_volatility = _rolling_volatility(clean_history, window=5)
     return {
-        "asset": asset.upper(),
+        "asset_encoded": encode_asset(asset),
+        "asset_class_encoded": encode_asset_class(asset_class),
         "price": round(float(price), 4),
-        "volatility": round(_volatility_from_history(clean_history), 6),
+        "return_1d": round(_return_over_period(clean_history, 1), 6),
+        "return_5d": round(_return_over_period(clean_history, 5), 6),
+        "return_10d": round(_return_over_period(clean_history, 10), 6),
+        "rolling_volatility": round(rolling_volatility, 6),
+        "volatility": round(rolling_volatility, 6),
         "history_points": len(clean_history),
     }
 
@@ -129,14 +153,23 @@ def build_derived_features(
     market_features: dict[str, Any],
     score: float,
     horizon: str,
-) -> dict[str, float | str]:
+    sector_sensitivity: float,
+    historical_accuracy_of_event_type: float,
+    rolling_accuracy_of_asset_predictions: float,
+) -> dict[str, float | int]:
     sentiment = float(event_features.get("sentiment", 0.0))
     severity = float(event_features.get("severity", 0.0))
-    volatility = float(market_features.get("volatility", 0.0))
+    event_type_encoded = int(event_features.get("event_type_encoded", 0))
+    asset_class_encoded = int(market_features.get("asset_class_encoded", _ASSET_CLASS_ENCODING["unknown"]))
+    volatility = float(market_features.get("rolling_volatility", 0.0))
     return {
         "baseline_score": round(score, 6),
-        "horizon": horizon,
+        "horizon_days": _horizon_to_days(horizon),
         "sentiment_x_severity": round(sentiment * severity, 6),
+        "sentiment_x_sector_sensitivity": round(sentiment * sector_sensitivity, 6),
+        "event_type_asset_class_interaction": event_type_encoded * asset_class_encoded,
+        "historical_accuracy_of_event_type": round(historical_accuracy_of_event_type, 6),
+        "rolling_accuracy_of_asset_predictions": round(rolling_accuracy_of_asset_predictions, 6),
         "severity_x_volatility": round(severity * volatility, 6),
     }
 
@@ -153,8 +186,43 @@ def flatten_feature_snapshot(
         ("derived", derived_features),
     ):
         for key, value in values.items():
-            flattened[f"{prefix}_{key}"] = value
+            flattened[f"{prefix}_{key}"] = _numeric_feature_value(value)
     return flattened
+
+
+def encode_event_type(event_type: str) -> int:
+    return _EVENT_TYPE_ENCODING.get(event_type, _EVENT_TYPE_ENCODING["general_market"])
+
+
+def asset_class_for_symbol(asset: str) -> str:
+    symbol = asset.upper()
+    for asset_class, symbols in _ASSET_CLASS_HINTS.items():
+        if symbol in symbols:
+            return asset_class
+    if symbol.startswith("XL"):
+        return "broad_market"
+    return "unknown"
+
+
+def encode_asset_class(asset_class: str) -> int:
+    return _ASSET_CLASS_ENCODING.get(asset_class, _ASSET_CLASS_ENCODING["unknown"])
+
+
+def encode_asset(asset: str) -> int:
+    return sum((index + 1) * ord(char) for index, char in enumerate(asset.upper()))
+
+
+def sector_sensitivity_for_asset(asset: str, sectors: list[str]) -> float:
+    if not sectors:
+        return 0.0
+
+    symbol = asset.upper()
+    matched = sum(1 for sector in sectors if symbol in _ASSET_CLASS_HINTS.get(sector, set()))
+    if matched:
+        return round(matched / len(sectors), 6)
+
+    asset_class = asset_class_for_symbol(symbol)
+    return 0.5 if asset_class in sectors else 0.0
 
 
 def _direction_score(direction: str) -> float:
@@ -183,8 +251,40 @@ def _volatility_from_history(history: list[float]) -> float:
     return math.sqrt(variance)
 
 
-def _datetime_to_iso(value: datetime) -> str:
-    return value.isoformat()
+def _rolling_volatility(history: list[float], *, window: int) -> float:
+    if len(history) < 2:
+        return 0.0
+    windowed_history = history[-(window + 1):]
+    return _volatility_from_history(windowed_history)
+
+
+def _return_over_period(history: list[float], periods: int) -> float:
+    if len(history) <= periods:
+        return 0.0
+    start_price = history[-(periods + 1)]
+    end_price = history[-1]
+    if start_price == 0:
+        return 0.0
+    return (end_price - start_price) / start_price
+
+
+def _horizon_to_days(horizon: str) -> int:
+    try:
+        return int(horizon.lower().replace("d", "").split("-")[0])
+    except (ValueError, AttributeError):
+        return 1
+
+
+def _numeric_feature_value(value: Any) -> float | int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        if math.isnan(value) or math.isinf(value):
+            return 0.0
+        return value
+    return 0.0
 
 
 def _clamp(value: float, lower: float, upper: float) -> float:

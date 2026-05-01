@@ -6,7 +6,7 @@ from typing import Any
 from sqlalchemy.orm import Session, object_session
 
 from app.core.config import settings
-from app.db.models import Event, FeatureSnapshot, Prediction
+from app.db.models import Event, FeatureSnapshot, Outcome, Prediction
 from app.db.session import SessionLocal
 from app.services.baseline_scoring import score_baseline_prediction
 from app.services.event_classifier import classify_event
@@ -14,6 +14,7 @@ from app.services.feature_service import (
     build_derived_features,
     build_event_features,
     build_market_features,
+    sector_sensitivity_for_asset,
     sentiment_from_classification,
     severity_to_score,
 )
@@ -46,6 +47,7 @@ def run_prediction_pipeline(
             session,
             persisted_event,
             symbols=symbols,
+            sectors=[str(sector) for sector in effective_classification.get("affected_sectors", [])],
             model_version=model_version,
         )
         session.commit()
@@ -118,6 +120,7 @@ def _store_predictions_for_assets(
     event: Event,
     *,
     symbols: Iterable[str],
+    sectors: list[str],
     model_version: str,
 ) -> list[Prediction]:
     stored: list[Prediction] = []
@@ -142,13 +145,25 @@ def _store_predictions_for_assets(
         baseline = score_baseline_prediction(
             sentiment=float(event_features["sentiment"]),
             severity=float(event_features["severity"]),
-            volatility=float(market_features["volatility"]),
+            volatility=float(market_features["rolling_volatility"]),
         )
+        prediction_timestamp = datetime.now(UTC)
         derived_features = build_derived_features(
             event_features=event_features,
             market_features=market_features,
             score=baseline.score,
             horizon=horizon,
+            sector_sensitivity=sector_sensitivity_for_asset(symbol, sectors),
+            historical_accuracy_of_event_type=_historical_accuracy_of_event_type(
+                db,
+                event.event_type,
+                before=prediction_timestamp,
+            ),
+            rolling_accuracy_of_asset_predictions=_rolling_accuracy_of_asset_predictions(
+                db,
+                symbol,
+                before=prediction_timestamp,
+            ),
         )
 
         prediction = Prediction(
@@ -157,7 +172,7 @@ def _store_predictions_for_assets(
             predicted_direction=baseline.predicted_direction,
             confidence=baseline.confidence,
             horizon=horizon,
-            timestamp=datetime.now(UTC),
+            timestamp=prediction_timestamp,
         )
         db.add(prediction)
         db.flush()
@@ -189,6 +204,55 @@ def _prediction_exists(db: Session, event: Event, symbol: str, horizon: str) -> 
         .first()
         is not None
     )
+
+
+def _historical_accuracy_of_event_type(db: Session, event_type: str, *, before: datetime) -> float:
+    labels = [
+        int(label)
+        for (label,) in (
+            db.query(Outcome.filtered_label)
+            .join(Prediction, Prediction.id == Outcome.prediction_id)
+            .join(Event, Event.id == Prediction.event_id)
+            .filter(
+                Event.event_type == event_type,
+                Prediction.timestamp < before,
+                Outcome.filtered_label.isnot(None),
+            )
+            .all()
+        )
+    ]
+    return _accuracy_or_prior(labels)
+
+
+def _rolling_accuracy_of_asset_predictions(
+    db: Session,
+    asset: str,
+    *,
+    before: datetime,
+    window: int = 50,
+) -> float:
+    labels = [
+        int(label)
+        for (label,) in (
+            db.query(Outcome.filtered_label)
+            .join(Prediction, Prediction.id == Outcome.prediction_id)
+            .filter(
+                Prediction.asset == asset.upper(),
+                Prediction.timestamp < before,
+                Outcome.filtered_label.isnot(None),
+            )
+            .order_by(Prediction.timestamp.desc())
+            .limit(window)
+            .all()
+        )
+    ]
+    return _accuracy_or_prior(labels)
+
+
+def _accuracy_or_prior(labels: list[int]) -> float:
+    if not labels:
+        return 0.5
+    return sum(labels) / len(labels)
 
 
 def _assets_for_event(article: dict[str, Any], classification: dict[str, Any]) -> list[str]:

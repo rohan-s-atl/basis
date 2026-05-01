@@ -6,7 +6,12 @@ from app.db.models import FeatureSnapshot, Outcome, Prediction
 from app.db.session import Base
 from app.services.outcome_service import compute_outcomes
 from app.services.prediction_pipeline import run_prediction_pipeline
-from app.services.training_data_service import export_training_dataset
+from app.services.training_data_service import (
+    export_training_dataset,
+    get_confidence_bucket_metrics,
+    get_train_test_split,
+    validate_dataset,
+)
 
 
 def test_prediction_pipeline_stores_features_and_exports_labeled_dataset(monkeypatch) -> None:
@@ -64,29 +69,78 @@ def test_prediction_pipeline_stores_features_and_exports_labeled_dataset(monkeyp
     finally:
         db_session.close()
 
-    assert result == {"computed": 1, "skipped": 0}
+    assert result == {"computed": 1, "skipped": 0, "filtered": 0}
     assert outcome.label == 1
+    assert outcome.filtered_label == 1
     assert outcome.actual_return == 0.1
-    assert dataset == [
-        {
-            "features": {
-                "event_event_type": "inflation",
-                "event_region": "global",
-                "event_sentiment": 0.8,
-                "event_severity": 0.8,
-                "event_source": "news",
-                "event_model_version": "gpt-4o-mini",
-                "event_event_timestamp": "2026-04-27T00:00:00+00:00",
-                "market_asset": "SPY",
-                "market_price": 100.0,
-                "market_volatility": 0.0,
-                "market_history_points": 2,
-                "derived_baseline_score": 0.72,
-                "derived_horizon": "3d",
-                "derived_sentiment_x_severity": 0.64,
-                "derived_severity_x_volatility": 0.0,
-                "derived_prediction_model_version": "baseline-rule-v1",
+    assert dataset[0]["label"] == 1
+    assert dataset[0]["features"]["event_event_type_encoded"] == 2
+    assert dataset[0]["features"]["market_return_1d"] > 0
+    assert dataset[0]["features"]["market_return_5d"] == 0.0
+    assert dataset[0]["features"]["market_return_10d"] == 0.0
+    assert "derived_sentiment_x_sector_sensitivity" in dataset[0]["features"]
+    assert "derived_event_type_asset_class_interaction" in dataset[0]["features"]
+    assert "derived_historical_accuracy_of_event_type" in dataset[0]["features"]
+    assert "derived_rolling_accuracy_of_asset_predictions" in dataset[0]["features"]
+    assert all(isinstance(value, (int, float)) for value in dataset[0]["features"].values())
+
+    split = get_train_test_split(db_session)
+    buckets = get_confidence_bucket_metrics(db_session)
+    report = validate_dataset(db_session)
+
+    assert split["train"] == []
+    assert split["test"] == dataset
+    assert buckets["0.8+"]["samples"] == 1
+    assert report["num_samples"] == 1
+
+
+def test_compute_outcomes_filters_noise_from_training_dataset(monkeypatch) -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    Base.metadata.create_all(bind=engine)
+    db_session = TestingSessionLocal()
+
+    monkeypatch.setattr(
+        "app.services.prediction_pipeline.fetch_price",
+        lambda symbol: {"symbol": symbol, "price": 100.0, "history": [99.0, 100.0]},
+    )
+
+    try:
+        run_prediction_pipeline(
+            {
+                "title": "Technology shares drift",
+                "description": "The move is small and directionally weak.",
+                "publishedAt": "2026-04-27T00:00:00Z",
             },
-            "label": 1,
-        }
-    ]
+            db=db_session,
+            classification={
+                "event_type": "general_market",
+                "affected_sectors": ["technology"],
+                "impact_direction": "positive",
+                "confidence": 0.6,
+                "severity": "medium",
+                "reasoning": "Small market move.",
+            },
+            mapped_assets=["QQQ"],
+        )
+        monkeypatch.setattr(
+            "app.services.outcome_service.fetch_price",
+            lambda symbol: {"symbol": symbol, "price": 100.1, "history": [100.0, 100.1]},
+        )
+
+        result = compute_outcomes(db=db_session, noise_threshold=0.002)
+        outcome = db_session.query(Outcome).one()
+        dataset = export_training_dataset(db_session)
+    finally:
+        db_session.close()
+
+    assert result == {"computed": 1, "skipped": 0, "filtered": 1}
+    assert outcome.raw_return == 0.001
+    assert outcome.label is None
+    assert outcome.filtered_label is None
+    assert outcome.threshold_used == 0.002
+    assert dataset == []

@@ -30,6 +30,7 @@ class Settings:
     classification_cache_ttl_seconds: int = int(
         os.getenv("CLASSIFICATION_CACHE_TTL_SECONDS", "86400")
     )
+    outcome_noise_threshold: float = float(os.getenv("OUTCOME_NOISE_THRESHOLD", "0.002"))
 
 
 settings = Settings()

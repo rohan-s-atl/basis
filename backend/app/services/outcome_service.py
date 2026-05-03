@@ -17,6 +17,7 @@ def compute_outcomes(
     db: Session | None = None,
     limit: int = 500,
     noise_threshold: float | None = None,
+    force: bool = False,
 ) -> dict[str, int]:
     owns_session = db is None
     session = db or SessionLocal()
@@ -26,6 +27,9 @@ def compute_outcomes(
     filtered = 0
 
     try:
+        if force:
+            session.query(Outcome).delete()
+            session.flush()
         predictions = _predictions_without_outcomes(session, limit=limit)
         for prediction in predictions:
             snapshot = prediction.feature_snapshot

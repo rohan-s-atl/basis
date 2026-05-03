@@ -44,6 +44,63 @@ def _run_signal_evaluation() -> None:
         db.close()
 
 
+def _run_compute_outcomes() -> None:
+    from app.services.outcome_service import compute_outcomes
+    db = SessionLocal()
+    try:
+        result = compute_outcomes(db=db)
+        logger.info(
+            "Outcome computation complete: computed=%d skipped=%d filtered=%d",
+            result["computed"],
+            result["skipped"],
+            result["filtered"],
+        )
+        if result["computed"] > 0:
+            _run_auto_retrain_if_needed()
+    except Exception as exc:
+        logger.error("Outcome computation failed: %s", exc)
+    finally:
+        db.close()
+
+
+def _run_auto_retrain_if_needed() -> None:
+    from app.services.training_data_service import get_dataset_stats
+    from app.services.training_run_service import should_auto_retrain
+    db = SessionLocal()
+    try:
+        stats = get_dataset_stats(db)
+        if should_auto_retrain(db, stats["num_samples"]):
+            _run_train_model(triggered_by="auto")
+    except Exception as exc:
+        logger.error("Auto-retrain check failed: %s", exc)
+    finally:
+        db.close()
+
+
+def _run_train_model(triggered_by: str = "auto") -> None:
+    from ml.model_store import invalidate_cache
+    from ml.train_model import result_to_dict, train_xgboost_model
+    from app.services.training_run_service import save_training_run
+    db = SessionLocal()
+    try:
+        result = train_xgboost_model(
+            api_url="http://127.0.0.1:8000/export-training-data",
+        )
+        invalidate_cache()
+        payload = result_to_dict(result)
+        save_training_run(db, payload, triggered_by=triggered_by)
+        logger.info(
+            "Auto-retrain complete: dataset_size=%d accuracy=%.4f roc_auc=%s",
+            payload["dataset_size"],
+            payload["accuracy"],
+            payload.get("roc_auc"),
+        )
+    except Exception as exc:
+        logger.error("Auto-retrain failed: %s", exc)
+    finally:
+        db.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     init_db()
@@ -53,6 +110,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         scheduler = BackgroundScheduler(daemon=True)
         scheduler.add_job(_run_ingestion, "interval", minutes=15, id="ingestion")
         scheduler.add_job(_run_signal_evaluation, "interval", hours=1, id="signal_eval")
+        scheduler.add_job(_run_compute_outcomes, "interval", hours=1, id="compute_outcomes")
         scheduler.start()
     else:
         logger.warning("apscheduler is not installed; background jobs are disabled")

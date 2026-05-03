@@ -1,231 +1,214 @@
 # Macro Event Intelligence Engine
 
-Macro Event Intelligence Engine is a full-stack AI financial intelligence system that converts real-world news into structured macro events, maps those events to affected sectors and financial assets, and evaluates whether the resulting signals are useful over time.
+A full-stack AI financial intelligence system that converts real-world news into structured macro events, maps them to affected assets, and runs a self-improving ML prediction pipeline with live market regime awareness.
 
-The project is designed as a production-style resume project: it combines news ingestion, LLM event classification, market data enrichment, explainable asset mapping, portfolio/watchlist analysis, historical price charts, signal backtesting, and an interpretable prediction layer.
+## What It Does
 
-## Core Idea
+Financial markets react to macro events: rate decisions, inflation data, geopolitical conflict, supply shocks, earnings, energy disruptions. This system ingests news, classifies each article into a structured financial event using an LLM, links it to relevant ETFs and assets, generates directional predictions using a trained XGBoost model, tracks outcomes across multiple time horizons, and visualizes everything in a professional trading-terminal-style dashboard.
 
-Financial markets react to macro events: inflation data, rate decisions, supply shocks, geopolitical conflicts, earnings, energy disruptions, and broad risk sentiment. This system ingests news, classifies each article into a macro-financial event, links the event to relevant ETFs/assets, and presents the result in a decision-focused market cockpit.
-
-The goal is not to make trading recommendations. The goal is to build a measurable intelligence pipeline:
-
-```text
-News -> Event Classification -> Asset Mapping -> Market Data -> Prediction -> Backtest -> Model-Ready Features
+```
+News → LLM Classification → Asset Mapping → Feature Engineering → XGBoost Prediction
+     → Outcome Tracking → Model Retraining → Drift Detection → Live Dashboard
 ```
 
-## Major Features
+---
 
-- FastAPI backend with modular services, typed schemas, and test coverage.
-- React + Vite + Tailwind frontend with a dark quant-style cockpit.
-- News ingestion from NewsAPI with local fallback behavior.
-- OpenAI-powered event classification.
-- Rule/config-based macro asset mapping.
-- yfinance market data for prices and historical OHLCV charts.
-- SQLite persistence for classified events, market snapshots, and backtest records.
-- Watchlist impact analysis for user-defined symbols.
-- Event clustering and macro situation grouping.
-- Forward-looking prediction engine with probability, expected move, horizon, drivers, and scenario cases.
-- Backtesting layer that evaluates event-to-asset signals against market movement.
-- Interpretable feature-based ML scoring layer for ranking signal quality.
-- Signal accuracy and outcome tracking.
+## Architecture
 
-## System Architecture
-
-```text
+```
 backend/
   app/
-    main.py
-    schemas.py
-    api/
-      backtest.py
-      combined.py
-      events.py
-      market.py
-      news.py
-      predictions.py
-      signals.py
-      watchlist.py
+    api/                     FastAPI routers
+      training.py            ML training endpoints and experiment tracking
+      predictions.py         Forward prediction pipeline
+      market.py              Prices, history, market regime
+      events.py / combined.py / signals.py / backtest.py / watchlist.py
     services/
-      event_classifier.py
-      ingestion_service.py
-      mapping_service.py
-      market_service.py
-      news_service.py
-      prediction_service.py
-      backtest_service.py
-      feature_service.py
-      signal_evaluator.py
-      watchlist_service.py
-    repositories/
-      event_repository.py
-      backtest_repository.py
+      prediction_pipeline.py  End-to-end prediction flow
+      feature_service.py      Feature engineering and snapshot flattening
+      outcome_service.py      Single-horizon outcome computation
+      multi_horizon_service.py 1d / 3d / 5d outcome labeling via yfinance
+      training_data_service.py Training dataset export and validation
+      training_run_service.py  Experiment tracking and drift detection
+      regime_service.py       Live market regime (VIX, SPY, 10Y yield)
+      embedding_service.py    OpenAI text embeddings and semantic deduplication
+      ml_scorer.py            XGBoost inference with SHAP and baseline fallback
+      baseline_scoring.py     Rule-based fallback scorer
+      event_classifier.py     LLM-based event classification
+      ingestion_service.py    News ingestion and deduplication
+      mapping_service.py      Event-to-asset mapping
+      market_service.py       yfinance price and OHLCV fetching
     db/
-      models.py
-      session.py
-      init_db.py
-    data/
-      asset_mapping.json
-      watchlist_symbol_profiles.json
-  tests/
-  requirements.txt
+      models.py               SQLAlchemy models (Event, Prediction, Outcome, etc.)
+      init_db.py              Schema migrations and table creation
+    main.py                   FastAPI app, scheduler, background jobs
+  ml/
+    train_model.py            XGBoost training pipeline
+    model_store.py            Hot-reload model cache
+    models/                   Saved model artifacts (xgboost_model.json, calibrated_model.pkl)
 
 frontend/
   src/
-    App.tsx
+    App.tsx                   Main cockpit layout and tab routing
     components/
+      MLIntelligencePanel.tsx  ML health, regime, feature importance, training history
+      PredictionsPanel.tsx     Forward predictions
+      BacktestPanel.tsx        Signal backtest analytics
+      AssetTable.tsx           Asset decision table with sparklines
+      EventFeed.tsx            Macro event stream
+      SectorHeatmap.tsx        Sector pressure heatmap
+      IntelligencePanel.tsx    Selected event detail
+      ... (11 total components)
     lib/
-    types.ts
-    styles.css
-  package.json
+      api.ts                  Typed API client with fallback and timeout handling
+      intelligence.ts         Frontend data helpers
+    types.ts                  Shared TypeScript types
 ```
 
-## Backend Capabilities
+---
 
-The backend exposes the intelligence pipeline through FastAPI.
+## ML Pipeline
 
-### News and Event Intelligence
+### Feature Engineering
 
-- Fetches recent macro/market news.
-- Uses OpenAI to classify articles into structured event intelligence:
-  - event type
-  - affected sectors
-  - impact direction
-  - confidence
-  - severity
-  - reasoning
-- Stores classified events for later analysis.
+Every prediction persists a `FeatureSnapshot` with three namespaced feature groups:
 
-### Market Data
+**Event features** — derived from LLM classification output:
+- `event_type_encoded`, `sentiment`, `severity`, `event_timestamp_unix`
+- `text_embedding_norm`, `text_embedding_pos_sim`, `text_embedding_neg_sim`, `text_embedding_vol_sim` (from OpenAI `text-embedding-3-small`)
 
-- Fetches current prices with yfinance.
-- Fetches historical OHLCV market data for charting.
-- Caches repeated price/history requests.
-- Persists market snapshots linked to event records.
+**Market features** — derived from yfinance price data at prediction time:
+- `price`, `return_1d`, `return_5d`, `return_10d`, `sector_return_5d`, `sector_return_10d`
+- `relative_strength_5d`, `rolling_volatility`, `asset_encoded`, `asset_class_encoded`
 
-### Asset Mapping
+**Derived features** — cross-feature interactions and live regime data:
+- `baseline_score`, `sentiment_x_severity`, `sentiment_x_sector_sensitivity`, `severity_x_volatility`
+- `event_type_asset_class_interaction`
+- `historical_accuracy_of_event_type`, `rolling_accuracy_of_asset_predictions`
+- `event_asset_avg_return`, `event_asset_accuracy`
+- `vix_level`, `vix_regime_encoded`, `spy_trend`, `rate_level`, `market_regime_encoded`
 
-Asset mappings are kept in JSON configuration rather than hardcoded throughout the codebase.
+### Model Training
 
-Examples:
+The training pipeline (`ml/train_model.py`) runs on demand or triggers automatically:
 
-- Energy/geopolitical shocks can map to `XLE`, `USO`, `DBC`, `GLD`.
-- Inflation and rates can map to `TIP`, `TLT`, `SPY`, `QQQ`.
-- Technology events can map to `QQQ`, `XLK`.
-- Financial events can map to `XLF`.
+1. **Walk-forward cross-validation** — expanding window splits that respect temporal ordering, no future data leakage
+2. **Model comparison** — XGBoost vs logistic regression (StandardScaler + LogisticRegression pipeline) on test accuracy and ROC-AUC
+3. **SHAP explainability** — TreeExplainer mean absolute SHAP values per feature on the test set
+4. **Platt calibration** — `CalibratedClassifierCV(cv=3)` wraps the raw XGBoost to produce better-calibrated probabilities; Brier score improvement tracked before and after
+5. **Confidence bucket analysis** — accuracy broken down by prediction confidence band (0.5–0.6, 0.6–0.7, 0.7–0.8, 0.8+)
 
-This makes the system easier to expand as market assumptions evolve.
+Artifacts saved: `xgboost_model.json`, `calibrated_model.pkl`, `feature_names.json`. The model store uses mtime-based hot-reload so new models are picked up without restarting the server.
 
-## AI and ML Layer
+### Outcome Labeling
 
-The system currently has two model-related layers.
+**Single-horizon** (`outcome_service.py`): Fetches current price vs entry price, applies direction label, filters noise below a configurable return threshold.
 
-### 1. LLM Event Classification
+**Multi-horizon** (`multi_horizon_service.py`): Labels each prediction at 1-day, 3-day, and 5-day horizons using yfinance historical closes. Predictions are grouped by symbol to minimize API calls. A minimum-age filter (8 days) ensures exit prices exist before attempting labeling. Multi-horizon labels are preferred over single-horizon when available, multiplying effective dataset size by up to 3×.
 
-OpenAI is used to convert unstructured news text into structured macro-financial intelligence.
+### Experiment Tracking
 
-Example output:
+Every training run is persisted to the `training_runs` table:
 
-```json
-{
-  "event_type": "geopolitical_conflict",
-  "affected_sectors": ["energy", "commodities"],
-  "impact_direction": "negative",
-  "confidence": 0.86,
-  "severity": "high",
-  "reasoning": "A disruption near a major energy shipping route can pressure oil supply and raise volatility."
-}
-```
+| Field | What it captures |
+|---|---|
+| `trained_at` | Timestamp of the run |
+| `triggered_by` | `manual` or `auto` |
+| `dataset_size` | Labeled samples at training time |
+| `accuracy`, `roc_auc` | Held-out test set metrics |
+| `brier_score_calibrated`, `brier_improvement` | Calibration quality |
+| `walk_forward_mean`, `walk_forward_std` | CV stability |
+| `xgboost_roc_auc`, `logistic_roc_auc` | Model comparison |
+| `top_features` | SHAP/gain feature importance snapshot |
+| `label_balance` | Class distribution at training time |
 
-### 2. Interpretable Signal Scoring
+### Auto-Retraining
 
-The project includes a lightweight, explainable scoring model that behaves like a logistic model. It ranks event-to-asset signals using features such as:
+The hourly outcome computation job checks whether the labeled dataset has grown by 25+ samples since the last training run. If so, retraining fires automatically in the background, the new model artifacts replace the old ones, and the run is logged. No manual intervention needed.
 
-- event confidence
-- severity score
-- direction score
-- sector count
-- asset specificity
-- volatility proxy
-- macro ETF / sector ETF flags
+### Drift Detection
 
-This is not pretending to be a fully trained model yet. It is a model-ready baseline that can later be replaced by a trained classifier once enough labeled backtest outcomes exist.
+`GET /model-health` computes rolling accuracy over the last 30 labeled predictions and compares it to the peak accuracy from the training history. If the gap exceeds 10 percentage points with at least 10 samples in the window, `drift_detected: true` is returned and the dashboard surfaces an alert.
 
-## Backtesting
+### Semantic Deduplication
 
-The backtesting layer evaluates whether event-to-asset signals moved in the expected direction.
+Incoming news articles are deduplicated in two stages:
 
-It stores:
+1. **Exact match** — timestamp + raw text + source hash (zero API cost)
+2. **Semantic similarity** — OpenAI `text-embedding-3-small` embedding compared against all events from the last 48 hours using cosine similarity (threshold 0.92). Duplicate articles reuse the existing event rather than creating a new one.
 
-- symbol
-- event type
-- expected direction
-- entry price
-- exit price
-- return percentage
-- correctness
-- confidence
-- severity
-- ML score
-- feature vector
+### Market Regime Detection
 
-Flat moves are treated as `flat`, not failed predictions. Accuracy is calculated only on actionable moves above a small return threshold.
+`regime_service.py` fetches live VIX, SPY 20-day trend, and 10Y yield (^TNX) via yfinance and encodes them into regime features injected into every prediction's derived feature set:
 
-## Prediction Engine
+- `vix_regime_encoded`: 0=calm (<15), 1=normal (15–25), 2=stressed (25–35), 3=crisis (>35)
+- `market_regime_encoded`: 0=risk-on, 1=neutral, 2=risk-off
 
-The prediction service generates forward-looking asset forecasts from current events.
+Regime data is cached for 1 hour.
 
-Each prediction includes:
+---
 
-- symbol
-- event title
-- event type
-- impacted sectors
-- predicted direction
-- probability score
-- expected move range
-- forecast horizon
-- bull/base/bear scenarios
-- model drivers
-- model version
+## Background Jobs
 
-This creates a clean interface that can later be powered by a trained ML model.
+Three APScheduler jobs run continuously:
+
+| Job | Interval | What it does |
+|---|---|---|
+| `_run_ingestion` | Every 15 min | Fetches news, classifies events, runs prediction pipeline |
+| `_run_compute_outcomes` | Every 1 hour | Labels new outcomes, checks auto-retrain threshold |
+| `_run_signal_evaluation` | Every 1 hour | Evaluates legacy signal backtest records |
+
+---
 
 ## Frontend Cockpit
 
-The frontend is a professional dark quant dashboard built with React, Vite, and Tailwind CSS.
+Built with React 19, TypeScript, Vite, and TailwindCSS. No UI component library — entirely custom dark quant-terminal aesthetic.
 
-Main sections:
+**Main layout:**
+- **Left** — Event Feed (searchable macro stream) + Macro Situations (event clusters)
+- **Center** — Asset Decision Table with live prices and sparklines, Event Timeline, Sector Heatmap
+- **Right** — Intelligence Panel (event reasoning, assets, suggested actions) + Workbench
 
-- **Event Feed**: searchable macro signal stream.
-- **Decision Table**: mapped assets, prices, impact direction, confidence, and mini charts.
-- **Asset Detail Modal**: Yahoo-style historical chart with OHLCV data and macro readthrough.
-- **Sector Heatmap**: sector pressure counts and filters.
-- **Intelligence Detail**: selected event reasoning, linked assets, and suggested actions.
-- **Workbench**:
-  - Breadth
-  - Alerts
-  - Predict
-  - Backtest
-  - Accuracy
+**Workbench tabs:**
+| Tab | Content |
+|---|---|
+| Breadth | Market breadth metrics, watchlist impact |
+| Alerts | Configurable alert rules with match counts |
+| Predict | Forward predictions with probability and expected move ranges |
+| Backtest | Signal outcome analytics by event type, symbol, severity |
+| Accuracy | Historical signal accuracy by event type |
+| **ML** | Model health status, drift indicator, market regime (VIX/SPY/rates), feature importance bars, training history sparkline with Retrain button |
 
-The UI is designed to feel like a hedge fund / Bloomberg / Palantir-style internal tool rather than a marketing dashboard.
+---
 
-## API Overview
+## API Reference
 
-```text
-GET  /                         Health check
-GET  /news                     Latest news articles
-GET  /combined                 News + classification + mapped assets
-GET  /events                   Persisted event records
-GET  /price/{symbol}           Current price and recent close history
-GET  /market/history/{symbol}  Historical OHLCV data
-POST /watchlist/impact         Portfolio/watchlist impact analysis
-GET  /signals/accuracy         Historical signal accuracy
-POST /backtest/run             Run signal backtest
-GET  /backtest/summary         Backtest analytics
-GET  /predictions              Forward-looking asset predictions
 ```
+GET  /                                Health check
+GET  /news                            Latest news articles
+GET  /combined                        News + LLM classification + mapped assets
+GET  /events                          Persisted event records
+GET  /price/{symbol}                  Current price and recent close history
+GET  /market/history/{symbol}         Historical OHLCV data
+GET  /market-regime                   Live VIX, SPY trend, 10Y yield, regime encoding
+POST /watchlist/impact                Portfolio/watchlist impact analysis
+GET  /signals/accuracy                Historical signal accuracy by event type
+POST /backtest/run                    Run signal backtest
+GET  /backtest/summary                Backtest analytics and top signals
+GET  /predictions                     Forward-looking asset predictions
+POST /compute-outcomes                Label outcomes for unlabeled predictions
+POST /compute-multi-horizon-outcomes  Label 1d/3d/5d outcomes
+GET  /export-training-data            Full labeled feature matrix for ML training
+GET  /training-data/split             Chronological train/test split
+GET  /training-data/stats             Dataset sample count and class balance
+GET  /training-data/validation        Dataset quality checks and issue list
+GET  /training-data/confidence-buckets Accuracy by model confidence band
+POST /train-model                     Train XGBoost, save artifacts, log run
+GET  /training-history                All training runs with full metrics
+GET  /model-health                    Rolling accuracy, peak accuracy, drift flag
+```
+
+---
 
 ## Local Setup
 
@@ -234,114 +217,81 @@ GET  /predictions              Forward-looking asset predictions
 ```bash
 cd backend
 python -m venv .venv
-.venv\Scripts\activate
+.venv\Scripts\activate       # Windows
+# source .venv/bin/activate  # macOS/Linux
 pip install -r requirements.txt
-copy .env.example .env
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8001 --reload
+copy .env.example .env       # fill in API keys
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-Backend docs:
-
-```text
-http://127.0.0.1:8001/docs
-```
+Interactive API docs: `http://127.0.0.1:8000/docs`
 
 ### Frontend
 
 ```bash
 cd frontend
 npm install
-copy .env.example .env
 npm run dev
 ```
 
-Frontend:
+Dashboard: `http://127.0.0.1:5173`
 
-```text
-http://127.0.0.1:5173
+### Train the Model
+
+After the backend is running and events have been ingested:
+
+```bash
+# Label outcomes (run once to seed labels)
+curl -X POST http://127.0.0.1:8000/compute-outcomes
+
+# Train XGBoost on labeled data
+curl -X POST http://127.0.0.1:8000/train-model
 ```
+
+Or use the **Retrain** button in the ML tab of the dashboard.
+
+---
 
 ## Environment Variables
 
-Backend:
+**Backend** (`.env`):
 
 ```env
 NEWS_API_KEY=
 NEWS_API_URL=https://newsapi.org/v2/everything
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-4o-mini
-DATABASE_URL=
+DATABASE_URL=                          # leave blank for local SQLite
+OUTCOME_NOISE_THRESHOLD=0.0001         # minimum return to count as a label
 NEWS_CACHE_TTL_SECONDS=900
 PRICE_CACHE_TTL_SECONDS=60
 CLASSIFICATION_CACHE_TTL_SECONDS=86400
 ```
 
-Frontend:
+**Frontend** (`.env`):
 
 ```env
-VITE_API_BASE_URL=http://127.0.0.1:8001
+VITE_API_BASE_URL=http://127.0.0.1:8000
 ```
 
-If `DATABASE_URL` is left blank, the backend defaults to local SQLite storage.
+---
 
-## Testing
+## What This Demonstrates
 
-Backend:
+- **Full-stack ML product design** — end-to-end pipeline from raw news to trained model to live UI
+- **Feature engineering** — event, market, derived, interaction, regime, and embedding features
+- **XGBoost with SHAP** — tree-based classification with feature attribution and Platt calibration
+- **Time-series ML discipline** — walk-forward CV, no data leakage, chronological splits
+- **Multi-horizon labeling** — outcome labels at 1d, 3d, 5d horizons from historical market data
+- **Autonomous ML lifecycle** — experiment tracking, auto-retraining triggers, drift detection
+- **LLM integration** — structured extraction via OpenAI + semantic deduplication via embeddings
+- **Market regime awareness** — live VIX/SPY/yield encoding injected as ML features
+- **FastAPI service architecture** — modular routers, dependency injection, typed schemas
+- **React dashboard** — professional dark terminal UI with live data, sparklines, and interactivity
+- **Background job scheduling** — APScheduler for continuous ingestion, labeling, and model health checks
 
-```bash
-cd backend
-python -m pytest
-```
-
-Frontend:
-
-```bash
-cd frontend
-npm run build
-```
-
-## Current Test Coverage
-
-The backend test suite covers:
-
-- combined endpoint behavior
-- event classifier fallback/validation
-- asset mapping logic
-- market history endpoint
-- watchlist impact service
-- backtest service
-- prediction service
-
-## Resume Highlights
-
-This project demonstrates:
-
-- Full-stack product architecture.
-- FastAPI service design.
-- LLM-based structured extraction.
-- Financial data enrichment.
-- Event-driven signal generation.
-- Feature engineering for ML readiness.
-- Interpretable model scoring.
-- Backtesting and outcome evaluation.
-- Frontend data visualization.
-- Clean separation between services, repositories, schemas, and UI components.
-
-## Roadmap
-
-Potential next steps:
-
-- Train a real supervised model on accumulated backtest records.
-- Add feature importance and model evaluation metrics.
-- Add Postgres support for production deployment.
-- Add scheduled background jobs with a real task queue.
-- Add authentication and saved user watchlists.
-- Add alert delivery through email, Slack, or web push.
-- Add source reliability scoring for news providers.
-- Add event deduplication using embeddings.
-- Add model versioning and experiment tracking.
-- Deploy backend and frontend to cloud infrastructure.
+---
 
 ## Disclaimer
 
-This project is for software engineering and research demonstration purposes. It is not financial advice, investment advice, or a trading system.
+This project is for software engineering and research demonstration purposes only. It is not financial advice, investment advice, or a trading system.

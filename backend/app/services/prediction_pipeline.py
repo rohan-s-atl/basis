@@ -9,6 +9,7 @@ from app.core.config import settings
 from app.db.models import Event, FeatureSnapshot, Outcome, Prediction
 from app.db.session import SessionLocal
 from app.services.baseline_scoring import score_baseline_prediction
+from app.services.ml_scorer import score_with_ml_model
 from app.services.event_classifier import classify_event
 from app.services.feature_service import (
     average_return_over_histories,
@@ -23,7 +24,7 @@ from app.services.feature_service import (
 from app.services.mapping_service import map_article_to_assets
 from app.services.market_service import fetch_price
 
-BASELINE_MODEL_VERSION = "baseline-rule-v1"
+from app.services.baseline_scoring import BASELINE_MODEL_VERSION
 logger = logging.getLogger(__name__)
 
 
@@ -90,6 +91,7 @@ def _persist_event(
     raw_text = _raw_text(article)
     source = str(article.get("source") or article.get("url") or "news")
 
+    # Step 1: exact-match deduplication
     persisted = (
         db.query(Event)
         .filter(
@@ -99,13 +101,42 @@ def _persist_event(
         )
         .one_or_none()
     )
+
     if persisted is None:
-        persisted = Event(
-            timestamp=timestamp,
-            raw_text=raw_text,
-            source=source,
-        )
-        db.add(persisted)
+        # Step 2: semantic deduplication via embedding similarity
+        from datetime import timedelta
+        import json as _json
+        from app.services.embedding_service import embed_text, is_semantic_duplicate
+
+        new_embedding = embed_text(raw_text)
+        if new_embedding:
+            cutoff = datetime.now(UTC) - timedelta(hours=48)
+            recent = (
+                db.query(Event)
+                .filter(Event.created_at >= cutoff, Event.text_embedding.isnot(None))
+                .all()
+            )
+            candidate_embeddings = []
+            for candidate in recent:
+                try:
+                    candidate_embeddings.append(_json.loads(candidate.text_embedding))
+                except Exception:
+                    continue
+
+            if is_semantic_duplicate(new_embedding, candidate_embeddings):
+                logger.info("Semantic duplicate detected — skipping new event for: %.60s", raw_text)
+                # Return the most recent matching event to reuse its predictions
+                persisted = recent[-1] if recent else None
+
+        if persisted is None:
+            persisted = Event(
+                timestamp=timestamp,
+                raw_text=raw_text,
+                source=source,
+            )
+            db.add(persisted)
+            if new_embedding:
+                persisted.text_embedding = _json.dumps(new_embedding)
 
     persisted.event_type = str(effective_classification["event_type"])
     persisted.region = str(article.get("region") or "global")
@@ -128,6 +159,13 @@ def _store_predictions_for_assets(
     stored: list[Prediction] = []
     event_features = build_event_features(event)
     horizon = prediction_horizon(event.event_type)
+
+    try:
+        from app.services.regime_service import fetch_market_regime
+        regime = fetch_market_regime()
+    except Exception as exc:
+        logger.warning("Regime fetch failed, using defaults: %s", exc)
+        regime = {}
 
     for raw_symbol in symbols:
         symbol = str(raw_symbol).upper()
@@ -185,13 +223,25 @@ def _store_predictions_for_assets(
                 event.event_type,
                 before=prediction_timestamp,
             ),
+            vix_level=float(regime.get("vix_level", 20.0)),
+            vix_regime_encoded=int(regime.get("vix_regime_encoded", 1)),
+            spy_trend=float(regime.get("spy_trend", 0.0)),
+            rate_level=float(regime.get("rate_level", 4.0)),
+            market_regime_encoded=int(regime.get("market_regime_encoded", 1)),
+        )
+
+        final_prediction, effective_model_version = score_with_ml_model(
+            event_features,
+            market_features,
+            derived_features,
+            fallback=baseline,
         )
 
         prediction = Prediction(
             event_id=event.id,
             asset=symbol,
-            predicted_direction=baseline.predicted_direction,
-            confidence=baseline.confidence,
+            predicted_direction=final_prediction.predicted_direction,
+            confidence=final_prediction.confidence,
             horizon=horizon,
             timestamp=prediction_timestamp,
         )
@@ -205,7 +255,7 @@ def _store_predictions_for_assets(
                 market_features=market_features,
                 derived_features={
                     **derived_features,
-                    "prediction_model_version": model_version,
+                    "prediction_model_version": effective_model_version,
                 },
             )
         )

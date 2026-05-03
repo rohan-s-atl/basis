@@ -83,6 +83,7 @@ class Event(Base):
     raw_text: Mapped[str] = mapped_column(Text, nullable=False)
     source: Mapped[str] = mapped_column(String(128), nullable=False, default="unknown")
     model_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    text_embedding: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
 
     predictions: Mapped[list["Prediction"]] = relationship(
@@ -112,6 +113,10 @@ class Prediction(Base):
         back_populates="prediction",
         cascade="all, delete-orphan",
         uselist=False,
+    )
+    multi_horizon_outcomes: Mapped[list["MultiHorizonOutcome"]] = relationship(
+        back_populates="prediction",
+        cascade="all, delete-orphan",
     )
 
 
@@ -152,3 +157,52 @@ class Outcome(Base):
     computed_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
 
     prediction: Mapped[Prediction] = relationship(back_populates="outcome")
+
+
+class TrainingRun(Base):
+    __tablename__ = "training_runs"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    trained_at: Mapped[datetime] = mapped_column(
+        default=lambda: datetime.now(UTC), nullable=False, index=True
+    )
+    triggered_by: Mapped[str] = mapped_column(String(64), nullable=False, default="manual")
+    dataset_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    train_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    test_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    accuracy: Mapped[float] = mapped_column(Float, nullable=False)
+    roc_auc: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    brier_score_calibrated: Mapped[float] = mapped_column(Float, nullable=False)
+    brier_improvement: Mapped[float] = mapped_column(Float, nullable=False)
+    walk_forward_mean: Mapped[float] = mapped_column(Float, nullable=False)
+    walk_forward_std: Mapped[float] = mapped_column(Float, nullable=False)
+    walk_forward_folds: Mapped[int] = mapped_column(Integer, nullable=False)
+    xgboost_roc_auc: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    logistic_roc_auc: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    winner_model: Mapped[str] = mapped_column(String(64), nullable=False)
+    top_features: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    label_balance: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+
+
+class MultiHorizonOutcome(Base):
+    __tablename__ = "multi_horizon_outcomes"
+    __table_args__ = (
+        UniqueConstraint("prediction_id", "horizon_days", name="uq_mho_pred_horizon"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    prediction_id: Mapped[UUID] = mapped_column(
+        ForeignKey("predictions.id"),
+        nullable=False,
+        index=True,
+    )
+    horizon_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    entry_price: Mapped[float] = mapped_column(Float, nullable=False)
+    exit_price: Mapped[float] = mapped_column(Float, nullable=False)
+    raw_return: Mapped[float] = mapped_column(Float, nullable=False)
+    return_magnitude: Mapped[float] = mapped_column(Float, nullable=False)
+    label: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    threshold_used: Mapped[float] = mapped_column(Float, nullable=False, default=0.002)
+    computed_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
+
+    prediction: Mapped[Prediction] = relationship(back_populates="multi_horizon_outcomes")

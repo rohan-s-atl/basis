@@ -9,5 +9,8 @@ httpx
 sqlalchemy
 apscheduler
 pandas
+numpy
 scikit-learn
 xgboost
+shap
+joblib

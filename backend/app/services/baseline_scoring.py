@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Literal
 
-
+BASELINE_MODEL_VERSION = "baseline-rule-v1"
 PredictionDirection = Literal["up", "down"]
 
 

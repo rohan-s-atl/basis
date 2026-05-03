@@ -6,6 +6,15 @@ from app.services.market_service import fetch_history, fetch_price
 router = APIRouter(tags=["market"])
 
 
+@router.get("/market-regime")
+def get_market_regime() -> dict[str, object]:
+    try:
+        from app.services.regime_service import fetch_market_regime
+        return fetch_market_regime()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Failed to fetch market regime") from exc
+
+
 @router.get("/price/{symbol}", response_model=MarketData)
 def get_price(symbol: str) -> dict[str, object]:
     try:

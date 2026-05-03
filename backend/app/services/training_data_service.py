@@ -4,7 +4,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.db.models import FeatureSnapshot, Outcome, Prediction
+from app.db.models import FeatureSnapshot, MultiHorizonOutcome, Outcome, Prediction
 from app.services.feature_service import flatten_feature_snapshot
 
 logger = logging.getLogger(__name__)
@@ -114,6 +114,18 @@ def _labeled_training_rows(
     limit: int,
     chronological: bool,
 ) -> list[dict[str, Any]]:
+    n_multi = db.query(MultiHorizonOutcome).filter(MultiHorizonOutcome.label.isnot(None)).count()
+    if n_multi > 0:
+        return _multi_horizon_rows(db, limit=limit, chronological=chronological)
+    return _single_horizon_rows(db, limit=limit, chronological=chronological)
+
+
+def _single_horizon_rows(
+    db: Session,
+    *,
+    limit: int,
+    chronological: bool,
+) -> list[dict[str, Any]]:
     order_column = Prediction.timestamp.asc() if chronological else Outcome.computed_at.desc()
     rows = (
         db.query(FeatureSnapshot, Outcome)
@@ -124,22 +136,52 @@ def _labeled_training_rows(
         .limit(limit)
         .all()
     )
-
     dataset: list[dict[str, Any]] = []
     for snapshot, outcome in rows:
-        flattened_features = flatten_feature_snapshot(
+        flattened = flatten_feature_snapshot(
             snapshot.event_features,
             snapshot.market_features,
             snapshot.derived_features,
         )
-        flattened_features["outcome_return_magnitude"] = _safe_numeric(outcome.return_magnitude)
-        dataset.append(
-            {
-                "features": flattened_features,
-                "label": int(outcome.filtered_label),
-                "timestamp": snapshot.prediction.timestamp,
-            }
+        dataset.append({
+            "features": flattened,
+            "label": int(outcome.filtered_label),
+            "timestamp": snapshot.prediction.timestamp,
+        })
+    return dataset
+
+
+def _multi_horizon_rows(
+    db: Session,
+    *,
+    limit: int,
+    chronological: bool,
+) -> list[dict[str, Any]]:
+    order_column = (
+        Prediction.timestamp.asc() if chronological else MultiHorizonOutcome.computed_at.desc()
+    )
+    rows = (
+        db.query(FeatureSnapshot, MultiHorizonOutcome)
+        .join(Prediction, Prediction.id == FeatureSnapshot.prediction_id)
+        .join(MultiHorizonOutcome, MultiHorizonOutcome.prediction_id == Prediction.id)
+        .filter(MultiHorizonOutcome.label.isnot(None))
+        .order_by(order_column)
+        .limit(limit)
+        .all()
+    )
+    dataset: list[dict[str, Any]] = []
+    for snapshot, outcome in rows:
+        derived = {**snapshot.derived_features, "horizon_days": outcome.horizon_days}
+        flattened = flatten_feature_snapshot(
+            snapshot.event_features,
+            snapshot.market_features,
+            derived,
         )
+        dataset.append({
+            "features": flattened,
+            "label": int(outcome.label),
+            "timestamp": snapshot.prediction.timestamp,
+        })
     return dataset
 
 

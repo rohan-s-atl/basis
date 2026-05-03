@@ -1,4 +1,4 @@
-import type { BacktestSummary, EventRecord, MarketHistory, PredictionSummary, PriceQuote, SignalAccuracy, WatchlistImpact } from "../types";
+import type { BacktestSummary, EventRecord, MarketHistory, MarketRegime, ModelHealth, PredictionSummary, PriceQuote, SignalAccuracy, TrainingRun, WatchlistImpact } from "../types";
 
 const configuredApiUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
 
@@ -99,15 +99,35 @@ export async function fetchPredictions(limit = 50): Promise<PredictionSummary> {
   return payload;
 }
 
+export async function fetchModelHealth(): Promise<ModelHealth> {
+  const { payload } = await requestJson<ModelHealth>("/model-health");
+  return payload;
+}
+
+export async function fetchTrainingHistory(limit = 20): Promise<TrainingRun[]> {
+  const { payload } = await requestJson<TrainingRun[]>(`/training-history?limit=${limit}`);
+  return payload;
+}
+
+export async function fetchMarketRegime(): Promise<MarketRegime> {
+  const { payload } = await requestJson<MarketRegime>("/market-regime");
+  return payload;
+}
+
+export async function triggerTrainModel(): Promise<void> {
+  await requestJson("/train-model", { method: "POST" }, 120_000);
+}
+
 async function requestJson<T>(
   path: string,
-  init?: RequestInit
+  init?: RequestInit,
+  timeoutMs = 8000,
 ): Promise<{ payload: T; baseUrl: string }> {
   let lastError: unknown;
 
   for (const baseUrl of API_BASE_URLS) {
     const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 8000);
+    const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
 
     try {
       const response = await fetch(`${baseUrl}${path}`, {

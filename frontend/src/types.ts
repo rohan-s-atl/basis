@@ -193,3 +193,54 @@ export type PredictionSummary = {
   count: number;
   predictions: AssetPrediction[];
 };
+
+export type FeatureImportance = {
+  feature: string;
+  importance: number;
+};
+
+export type LabelBalance = {
+  positive: number;
+  negative: number;
+  positive_count: number;
+  negative_count: number;
+};
+
+export type TrainingRun = {
+  id: string;
+  trained_at: string;
+  triggered_by: string;
+  dataset_size: number;
+  train_size: number;
+  test_size: number;
+  accuracy: number;
+  roc_auc: number | null;
+  brier_score_calibrated: number;
+  brier_improvement: number;
+  walk_forward_mean: number;
+  walk_forward_std: number;
+  walk_forward_folds: number;
+  xgboost_roc_auc: number | null;
+  logistic_roc_auc: number | null;
+  winner_model: string;
+  top_features: FeatureImportance[];
+  label_balance: LabelBalance;
+};
+
+export type ModelHealth = {
+  status: "healthy" | "drift_detected" | "no_model";
+  rolling_accuracy: { accuracy: number; samples: number; window: number } | null;
+  peak_accuracy: number | null;
+  drift_detected: boolean;
+  last_trained_at: string | null;
+  dataset_size_at_training: number | null;
+  retraining_threshold: number;
+};
+
+export type MarketRegime = {
+  vix_level: number;
+  vix_regime_encoded: number;
+  spy_trend: number;
+  rate_level: number;
+  market_regime_encoded: number;
+};

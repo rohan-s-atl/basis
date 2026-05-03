@@ -117,12 +117,32 @@ def sentiment_from_classification(classification: dict[str, Any]) -> float:
 
 
 def build_event_features(event: Event) -> dict[str, float | int]:
-    return {
+    features: dict[str, float | int] = {
         "event_type_encoded": encode_event_type(event.event_type),
         "sentiment": round(event.sentiment, 4),
         "severity": round(event.severity, 4),
         "event_timestamp_unix": int(event.timestamp.timestamp()),
+        "text_embedding_norm": 0.0,
+        "text_embedding_pos_sim": 0.5,
+        "text_embedding_neg_sim": 0.5,
+        "text_embedding_vol_sim": 0.5,
     }
+
+    raw_embedding = getattr(event, "text_embedding", None)
+    if raw_embedding:
+        try:
+            import json
+            from app.services.embedding_service import anchor_similarities, embedding_norm
+            emb = json.loads(raw_embedding)
+            features["text_embedding_norm"] = embedding_norm(emb)
+            sims = anchor_similarities(emb)
+            features["text_embedding_pos_sim"] = sims["pos_sim"]
+            features["text_embedding_neg_sim"] = sims["neg_sim"]
+            features["text_embedding_vol_sim"] = sims["vol_sim"]
+        except Exception:
+            pass
+
+    return features
 
 
 def build_market_features(
@@ -167,6 +187,11 @@ def build_derived_features(
     rolling_accuracy_of_asset_predictions: float,
     event_asset_avg_return: float,
     event_asset_accuracy: float,
+    vix_level: float = 20.0,
+    vix_regime_encoded: int = 1,
+    spy_trend: float = 0.0,
+    rate_level: float = 4.0,
+    market_regime_encoded: int = 1,
 ) -> dict[str, float | int]:
     sentiment = float(event_features.get("sentiment", 0.0))
     severity = float(event_features.get("severity", 0.0))
@@ -184,6 +209,11 @@ def build_derived_features(
         "event_asset_avg_return": round(event_asset_avg_return, 6),
         "event_asset_accuracy": round(event_asset_accuracy, 6),
         "severity_x_volatility": round(severity * volatility, 6),
+        "vix_level": round(vix_level, 4),
+        "vix_regime_encoded": vix_regime_encoded,
+        "spy_trend": round(spy_trend, 6),
+        "rate_level": round(rate_level, 4),
+        "market_regime_encoded": market_regime_encoded,
     }
 
 
@@ -199,6 +229,8 @@ def flatten_feature_snapshot(
         ("derived", derived_features),
     ):
         for key, value in values.items():
+            if not isinstance(value, (int, float, bool)):
+                continue
             flattened[f"{prefix}_{key}"] = _numeric_feature_value(value)
     return flattened
 

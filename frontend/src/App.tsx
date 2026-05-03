@@ -9,6 +9,7 @@ import { EventTimeline } from "./components/EventTimeline";
 import { IntelligencePanel } from "./components/IntelligencePanel";
 import { MacroSituations } from "./components/MacroSituations";
 import { MarketBreadth } from "./components/MarketBreadth";
+import { MLIntelligencePanel } from "./components/MLIntelligencePanel";
 import { PredictionsPanel } from "./components/PredictionsPanel";
 import { SectorHeatmap } from "./components/SectorHeatmap";
 import { SignalAccuracy } from "./components/SignalAccuracy";
@@ -28,7 +29,7 @@ function App() {
   const [selectedEventId, setSelectedEventId] = useState("");
   const [query, setQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState<ActiveFilter>(null);
-  const [rightTab, setRightTab] = useState<"breadth" | "alerts" | "predict" | "backtest" | "accuracy">("breadth");
+  const [rightTab, setRightTab] = useState<"breadth" | "alerts" | "predict" | "backtest" | "accuracy" | "ml">("breadth");
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [apiStatus, setApiStatus] = useState<"connecting" | "live" | "error">("connecting");
@@ -298,7 +299,8 @@ function App() {
                     ["alerts", "Alerts"],
                     ["predict", "Predict"],
                     ["backtest", "Backtest"],
-                    ["accuracy", "Accuracy"]
+                    ["accuracy", "Accuracy"],
+                    ["ml", "ML"],
                   ].map(([id, label]) => (
                     <button
                       key={id}
@@ -337,6 +339,7 @@ function App() {
               {rightTab === "predict" && <PredictionsPanel />}
               {rightTab === "backtest" && <BacktestPanel />}
               {rightTab === "accuracy" && <SignalAccuracy embedded />}
+              {rightTab === "ml" && <MLIntelligencePanel />}
             </section>
           </div>
         </section>

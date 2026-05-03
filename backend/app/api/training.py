@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends
+from typing import Any
+
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -54,3 +56,21 @@ def read_dataset_validation(
     db: Session = Depends(get_db),
 ) -> dict:
     return validate_dataset(db, limit=min(limit, 50_000))
+
+
+@router.post("/train-model")
+def train_model(
+    request: Request,
+    limit: int = 10_000,
+) -> dict[str, Any]:
+    from ml.train_model import result_to_dict, train_xgboost_model
+
+    export_url = str(request.url_for("export_training_data"))
+    bounded_limit = min(limit, 50_000)
+    result = train_xgboost_model(api_url=f"{export_url}?limit={bounded_limit}")
+    payload = result_to_dict(result)
+    return {
+        "accuracy": payload["accuracy"],
+        "roc_auc": payload["roc_auc"],
+        "top_features": payload["top_features"],
+    }

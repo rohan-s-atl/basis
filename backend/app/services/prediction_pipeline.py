@@ -1,3 +1,4 @@
+import hashlib
 import logging
 from collections.abc import Iterable
 from datetime import UTC, datetime
@@ -90,17 +91,10 @@ def _persist_event(
     timestamp = _parse_timestamp(article.get("publishedAt") or article.get("timestamp"))
     raw_text = _raw_text(article)
     source = str(article.get("source") or article.get("url") or "news")
+    content_hash = _compute_content_hash(timestamp, raw_text, source)
 
-    # Step 1: exact-match deduplication
-    persisted = (
-        db.query(Event)
-        .filter(
-            Event.timestamp == timestamp,
-            Event.raw_text == raw_text,
-            Event.source == source,
-        )
-        .one_or_none()
-    )
+    # Step 1: exact-match deduplication via indexed content_hash
+    persisted = db.query(Event).filter(Event.content_hash == content_hash).first()
 
     if persisted is None:
         # Step 2: semantic deduplication via embedding similarity
@@ -135,6 +129,7 @@ def _persist_event(
                 timestamp=timestamp,
                 raw_text=raw_text,
                 source=source,
+                content_hash=content_hash,
             )
             db.add(persisted)
             if new_embedding:
@@ -439,6 +434,11 @@ def _global_accuracy(db: Session, *, before: datetime) -> float:
 
 def _assets_for_event(article: dict[str, Any], classification: dict[str, Any]) -> list[str]:
     return map_article_to_assets(article, classification)
+
+
+def _compute_content_hash(timestamp: datetime, raw_text: str, source: str) -> str:
+    content = f"{timestamp.isoformat()}|{raw_text}|{source}"
+    return hashlib.sha256(content.encode()).hexdigest()
 
 
 def _raw_text(article: dict[str, Any]) -> str:

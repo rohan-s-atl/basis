@@ -1,14 +1,14 @@
-# Macro Event Intelligence Engine
+# Basis
 
-A full-stack AI financial intelligence system that converts real-world news into structured macro events, maps them to affected assets, and runs a self-improving ML prediction pipeline with live market regime awareness.
+Basis is a full-stack AI financial intelligence system that converts real-world news into structured macro events, maps them to affected assets, and runs a self-improving ML prediction pipeline with live market regime awareness.
 
 ## What It Does
 
-Financial markets react to macro events: rate decisions, inflation data, geopolitical conflict, supply shocks, earnings, energy disruptions. This system ingests news, classifies each article into a structured financial event using an LLM, links it to relevant ETFs and assets, generates directional predictions using a trained XGBoost model, tracks outcomes across multiple time horizons, and visualizes everything in a professional trading-terminal-style dashboard.
+Financial markets react to macro events: rate decisions, inflation data, geopolitical conflict, supply shocks, earnings, energy disruptions. Basis ingests news, classifies each article into a structured financial event using an LLM, links it to relevant ETFs and assets, generates directional predictions using a trained XGBoost model, tracks outcomes across multiple time horizons, and visualizes everything in a routed market-intelligence app.
 
 ```
 News → LLM Classification → Asset Mapping → Feature Engineering → XGBoost Prediction
-     → Outcome Tracking → Model Retraining → Drift Detection → Live Dashboard
+     → Outcome Tracking → Model Retraining → Drift Detection → Basis App
 ```
 
 ---
@@ -133,7 +133,7 @@ The hourly outcome computation job checks whether the labeled dataset has grown 
 
 ### Drift Detection
 
-`GET /model-health` computes rolling accuracy over the last 30 labeled predictions and compares it to the peak accuracy from the training history. It also compares recent prediction confidence against the training-time confidence distribution with Population Stability Index (PSI). If either accuracy drift or confidence-distribution drift crosses threshold, `drift_detected: true` is returned and the dashboard surfaces an alert.
+`GET /model-health` computes rolling accuracy over the last 30 labeled predictions and compares it to the peak accuracy from the training history. It also compares recent prediction confidence against the training-time confidence distribution with Population Stability Index (PSI). If either accuracy drift or confidence-distribution drift crosses threshold, `drift_detected: true` is returned and Basis surfaces an alert.
 
 ### Semantic Deduplication
 
@@ -165,11 +165,11 @@ Three APScheduler jobs run continuously:
 
 ---
 
-## Frontend Intelligence App
+## Basis App
 
 Built with React 19, TypeScript, Vite, and TailwindCSS. No UI component library — entirely custom dark quant-terminal aesthetic.
 
-The UI is organized as a routed intelligence app rather than one dense cockpit. Pages are shareable through hash routes and most rows/cards drill into deeper views.
+Basis is organized as a routed intelligence app rather than one dense cockpit. Pages are shareable through hash routes and most rows/cards drill into deeper views. The left rail carries the Basis brand, live system state, a compact pulse readout, model-readiness progress, market regime, and a dynamic next-action prompt.
 
 | Page | Purpose |
 |---|---|
@@ -243,7 +243,7 @@ npm install
 npm run dev
 ```
 
-Dashboard: `http://127.0.0.1:5173`
+Basis app: `http://127.0.0.1:5173`
 
 ### Train the Model
 
@@ -257,7 +257,7 @@ curl -X POST http://127.0.0.1:8000/compute-outcomes
 curl -X POST http://127.0.0.1:8000/train-model
 ```
 
-Or use the **Retrain** button in the ML tab of the dashboard.
+Or use the **Retrain** button in the ML Lab page of Basis.
 
 ---
 
@@ -297,7 +297,7 @@ VITE_API_BASE_URL=http://127.0.0.1:8000
 - **LLM integration** — structured extraction via OpenAI + semantic deduplication via embeddings
 - **Market regime awareness** — live VIX/SPY/yield encoding injected as ML features
 - **FastAPI service architecture** — modular routers, dependency injection, typed schemas
-- **React dashboard** — professional dark terminal UI with live data, sparklines, and interactivity
+- **React app** — professional dark terminal UI with routed pages, live data, sparklines, and interactivity
 - **Background job scheduling** — APScheduler for continuous ingestion, labeling, and model health checks
 
 ## Current Boundaries
@@ -305,7 +305,7 @@ VITE_API_BASE_URL=http://127.0.0.1:8000
 - Model metrics are only as credible as the labeled dataset. The recommended target is 300+ non-noise labeled samples with `OUTCOME_NOISE_THRESHOLD=0.0001`.
 - Multi-horizon labels require predictions old enough for the 1d/3d/5d exits to exist.
 - Runtime model artifacts are generated locally under `backend/ml/models/` and are intentionally ignored by git.
-- The dashboard uses request/refresh polling, not WebSockets.
+- Basis uses request/refresh polling, not WebSockets.
 - The heatmap is a macro/sector pressure view, not a signal-correlation matrix.
 
 ---

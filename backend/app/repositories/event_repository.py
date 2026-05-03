@@ -1,6 +1,7 @@
 import json
 from datetime import datetime
 
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from app.db.models import EventRecord, MarketSnapshot
@@ -16,28 +17,32 @@ def upsert_event_record(
     assets_json: str = "[]",
     price_at_event: float | None = None,
 ) -> EventRecord:
-    record = get_event_by_article_hash(db, article_hash)
+    values = {
+        "article_hash": article_hash,
+        "title": str(article.get("title") or ""),
+        "description": str(article.get("description") or ""),
+        "published_at": str(article.get("publishedAt") or ""),
+        "event_type": str(classification["event_type"]),
+        "affected_sectors": json.dumps(classification["affected_sectors"]),
+        "impact_direction": str(classification["impact_direction"]),
+        "confidence": float(classification["confidence"]),
+        "severity": str(classification["severity"]),
+        "reasoning": str(classification["reasoning"]),
+        "mapped_assets": json.dumps(mapped_assets),
+        "assets_json": assets_json,
+        "price_at_event": price_at_event,
+    }
 
-    if record is None:
-        record = EventRecord(article_hash=article_hash)
-        db.add(record)
+    update_set = {k: v for k, v in values.items() if k != "article_hash"}
+    if price_at_event is None:
+        # Never overwrite an existing price with None
+        del update_set["price_at_event"]
 
-    record.title = str(article.get("title") or "")
-    record.description = str(article.get("description") or "")
-    record.published_at = str(article.get("publishedAt") or "")
-    record.event_type = str(classification["event_type"])
-    record.affected_sectors = json.dumps(classification["affected_sectors"])
-    record.impact_direction = str(classification["impact_direction"])
-    record.confidence = float(classification["confidence"])
-    record.severity = str(classification["severity"])
-    record.reasoning = str(classification["reasoning"])
-    record.mapped_assets = json.dumps(mapped_assets)
-    record.assets_json = assets_json
-    if price_at_event is not None:
-        record.price_at_event = price_at_event
-
+    stmt = sqlite_insert(EventRecord).values(**values)
+    db.execute(stmt.on_conflict_do_update(index_elements=["article_hash"], set_=update_set))
     db.commit()
-    db.refresh(record)
+
+    record = get_event_by_article_hash(db, article_hash)
     return record
 
 

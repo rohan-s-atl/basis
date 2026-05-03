@@ -84,6 +84,8 @@ class Event(Base):
     source: Mapped[str] = mapped_column(String(128), nullable=False, default="unknown")
     model_version: Mapped[str] = mapped_column(String(64), nullable=False)
     text_embedding: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default=None)
+    # SHA-256 of "{timestamp}|{raw_text}|{source}" — unique dedup key
+    content_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, unique=True, index=True, default=None)
     created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
 
     predictions: Mapped[list["Prediction"]] = relationship(

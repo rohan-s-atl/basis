@@ -21,6 +21,7 @@ def get_combined(db: Session = Depends(get_db)) -> list[dict]:
             return results
     except Exception as exc:
         logger.warning("Ingestion failed, serving from DB: %s", exc)
+        db.rollback()
 
     stored = list_combined_from_db(db)
     if stored:

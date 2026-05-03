@@ -279,19 +279,25 @@ function App() {
   }
 
   const activeNav = route.name === "event" ? "events" : route.name === "asset" ? "assets" : route.name === "prediction" ? "predictions" : route.name === "regime" || route.name === "training" ? "ml" : route.name === "signal" ? "portfolio" : route.name;
+  const highImpactCount = events.filter((event) => event.severity === "high").length;
+  const linkedAssetCount = new Set(assetRows.map((row) => row.symbol)).size;
+  const sampleCount = appData.trainingStats?.num_samples ?? 0;
+  const sampleProgress = Math.min(100, (sampleCount / 300) * 100);
+  const regimeLabel = appData.marketRegime ? regimeName(appData.marketRegime.market_regime_encoded) : "Regime pending";
+  const sidebarAction = sidebarNextAction(appData, apiStatus);
 
   return (
     <main className="min-h-screen bg-quant-bg text-quant-text">
       <div className="pointer-events-none fixed inset-0 bg-[linear-gradient(rgba(139,148,158,0.04)_1px,transparent_1px),linear-gradient(90deg,rgba(139,148,158,0.04)_1px,transparent_1px)] bg-[size:48px_48px]" />
       <div className="relative z-10 flex min-h-screen">
-        <aside className="sticky top-0 hidden h-screen w-64 shrink-0 border-r border-quant-line bg-quant-bg/92 px-4 py-5 backdrop-blur-xl lg:block">
+        <aside className="scrollbar-quant sticky top-0 hidden h-screen w-64 shrink-0 overflow-y-auto border-r border-quant-line bg-quant-bg/92 px-4 py-5 backdrop-blur-xl lg:block">
           <button onClick={() => go("#/")} className="mb-7 flex w-full items-center gap-3 text-left">
             <div className="grid h-10 w-10 place-items-center rounded-lg border border-quant-green/40 bg-quant-green/10 text-quant-green">
               <BrainCircuit size={21} />
             </div>
             <div>
-              <p className="quant-eyebrow">Macro Engine</p>
-              <h1 className="text-lg font-black leading-tight text-quant-text">Intelligence App</h1>
+              <h1 className="text-2xl font-black leading-tight text-quant-text">Basis</h1>
+              <p className="mt-0.5 text-[0.68rem] font-bold uppercase tracking-[0.18em] text-quant-muted">Market intelligence</p>
             </div>
           </button>
 
@@ -324,6 +330,74 @@ function App() {
             </div>
             <p className="truncate text-xs text-quant-muted">{apiBaseUrl}</p>
             <p className="mt-1 text-xs text-quant-muted">Updated {lastUpdated}</p>
+          </div>
+
+          <div className="mt-4 grid gap-3">
+            <div className="rounded-lg border border-quant-line bg-quant-panel2 p-3">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <p className="quant-eyebrow">Pulse</p>
+                <span className={`text-[0.65rem] font-black uppercase ${apiStatus === "live" ? "text-quant-green" : "text-quant-yellow"}`}>
+                  {apiStatus === "live" ? "Online" : "Standby"}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <SidebarMetric label="Events" value={events.length.toString()} />
+                <SidebarMetric label="High" value={highImpactCount.toString()} tone={highImpactCount > 0 ? "red" : "muted"} />
+                <SidebarMetric label="Assets" value={linkedAssetCount.toString()} />
+                <SidebarMetric label="Alerts" value={alerts.length.toString()} tone={alerts.length > 0 ? "yellow" : "muted"} />
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => go("#/ml")}
+              className="rounded-lg border border-quant-line bg-quant-panel2 p-3 text-left transition hover:border-quant-green/50"
+            >
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <p className="quant-eyebrow">Model Core</p>
+                <span className={appData.modelHealth?.drift_detected ? "text-[0.65rem] font-black uppercase text-quant-red" : "text-[0.65rem] font-black uppercase text-quant-green"}>
+                  {appData.modelHealth?.drift_detected ? "Drift" : "Stable"}
+                </span>
+              </div>
+              <div className="mb-2 flex items-end justify-between">
+                <strong className="text-lg font-black text-quant-text">{sampleCount}</strong>
+                <span className="text-xs font-bold text-quant-muted">/ 300 samples</span>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-quant-bg">
+                <div className="h-full rounded-full bg-gradient-to-r from-quant-green to-quant-blue" style={{ width: `${sampleProgress}%` }} />
+              </div>
+              <p className="mt-2 text-xs leading-5 text-quant-muted">
+                {sampleCount < 300 ? "Learning window active" : "Credibility target reached"}
+              </p>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => go("#/regime")}
+              className="rounded-lg border border-quant-line bg-quant-panel2 p-3 text-left transition hover:border-quant-green/50"
+            >
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <p className="quant-eyebrow">Market State</p>
+                <span className={appData.marketRegime?.market_regime_encoded === 0 ? "text-[0.65rem] font-black uppercase text-quant-green" : "text-[0.65rem] font-black uppercase text-quant-yellow"}>
+                  {regimeLabel}
+                </span>
+              </div>
+              <div className="grid gap-2 text-xs font-bold text-quant-muted">
+                <div className="flex justify-between"><span>VIX</span><span className="text-quant-text">{appData.marketRegime?.vix_level?.toFixed(1) ?? "--"}</span></div>
+                <div className="flex justify-between"><span>SPY 20D</span><span className={(appData.marketRegime?.spy_trend ?? 0) >= 0 ? "text-quant-green" : "text-quant-red"}>{formatSignedPercent(appData.marketRegime?.spy_trend)}</span></div>
+                <div className="flex justify-between"><span>10Y</span><span className="text-quant-text">{appData.marketRegime?.rate_level?.toFixed(2) ?? "--"}%</span></div>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => go(sidebarAction.route)}
+              className="rounded-lg border border-quant-green/30 bg-quant-green/8 p-3 text-left transition hover:border-quant-green/60"
+            >
+              <p className="quant-eyebrow mb-2">Next Action</p>
+              <p className="text-sm font-black text-quant-green">{sidebarAction.title}</p>
+              <p className="mt-1 text-xs leading-5 text-quant-muted">{sidebarAction.detail}</p>
+            </button>
           </div>
         </aside>
 
@@ -1527,7 +1601,7 @@ function RegimeSummary({ regime, large = false }: { regime: MarketRegime | null;
   );
 }
 
-function BreakdownTable({ title, groups }: { title: string; groups?: Record<string, { total: number; actionable: number; accuracy_pct: number; avg_return_pct: number; avg_ml_score: number }> }) {
+function BreakdownTable({ title, groups }: { title: string; groups?: Record<string, { total: number; actionable: number; flat?: number; correct: number; accuracy_pct: number; avg_return_pct: number; avg_ml_score: number }> }) {
   const rows = Object.entries(groups ?? {}).slice(0, 6);
   return (
     <div className="rounded-lg border border-quant-line bg-quant-panel2 p-3">
@@ -1539,9 +1613,11 @@ function BreakdownTable({ title, groups }: { title: string; groups?: Record<stri
           <div key={key} className="rounded-md border border-quant-line bg-quant-bg/55 p-2">
             <div className="mb-1 flex items-center justify-between gap-2 text-xs">
               <strong className="truncate capitalize text-quant-text">{formatLabel(key)}</strong>
-              <span className="font-black text-quant-muted">{stats.accuracy_pct}%</span>
+              <span className="font-black text-quant-muted" title={`${stats.correct} correct of ${stats.actionable} actionable signals. ${stats.total - stats.actionable} flat or pending signals are excluded.`}>
+                {stats.accuracy_pct}% accuracy
+              </span>
             </div>
-            <p className="text-[0.65rem] text-quant-muted">{stats.actionable}/{stats.total} actionable | avg {stats.avg_return_pct}% | score {stats.avg_ml_score.toFixed(2)}</p>
+            <p className="text-[0.65rem] text-quant-muted">{stats.correct}/{stats.actionable} correct | {stats.actionable}/{stats.total} actionable | avg {stats.avg_return_pct}% | score {stats.avg_ml_score.toFixed(2)}</p>
           </div>
         ))}
       </div>
@@ -1656,6 +1732,65 @@ function MetricCard({ label, value, icon: Icon, onClick }: { label: string; valu
   );
 }
 
+function SidebarMetric({ label, value, tone = "green" }: { label: string; value: string; tone?: "green" | "yellow" | "red" | "muted" }) {
+  const toneClass = tone === "red" ? "text-quant-red" : tone === "yellow" ? "text-quant-yellow" : tone === "muted" ? "text-quant-muted" : "text-quant-green";
+  return (
+    <div className="rounded-md border border-quant-line bg-quant-bg/55 p-2">
+      <p className="text-[0.58rem] font-black uppercase text-quant-muted">{label}</p>
+      <strong className={`mt-0.5 block text-base font-black ${toneClass}`}>{value}</strong>
+    </div>
+  );
+}
+
+function sidebarNextAction(appData: AppData, apiStatus: "connecting" | "live" | "error") {
+  if (apiStatus === "error") {
+    return {
+      title: "Reconnect backend",
+      detail: "Basis cannot reach the API. Restart FastAPI or check the configured base URL.",
+      route: "#/data"
+    };
+  }
+  const sampleCount = appData.trainingStats?.num_samples ?? 0;
+  if (sampleCount < 300) {
+    return {
+      title: "Grow label set",
+      detail: `${sampleCount}/300 samples. Let market data mature, then compute outcomes and retrain.`,
+      route: "#/data"
+    };
+  }
+  if (appData.modelHealth?.drift_detected) {
+    return {
+      title: "Review drift",
+      detail: "Accuracy or confidence distribution moved away from the trained baseline.",
+      route: "#/ml"
+    };
+  }
+  if ((appData.backtest?.flat_signals ?? 0) > (appData.backtest?.actionable_signals ?? 0)) {
+    return {
+      title: "Wait for outcomes",
+      detail: "Many signals are still flat or pending, so portfolio accuracy is early.",
+      route: "#/portfolio"
+    };
+  }
+  return {
+    title: "Monitor live feed",
+    detail: "Pipeline is online. Watch new events, predictions, and market regime shifts.",
+    route: "#/events"
+  };
+}
+
+function regimeName(encoded: number) {
+  if (encoded === 0) return "Risk on";
+  if (encoded === 2) return "Risk off";
+  return "Neutral";
+}
+
+function formatSignedPercent(value: number | undefined) {
+  if (value === undefined || Number.isNaN(value)) return "--";
+  const pct = value * 100;
+  return `${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%`;
+}
+
 function DetailStat({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border border-quant-line bg-quant-panel2 p-3">
@@ -1764,8 +1899,8 @@ function PriceLineChart({ values }: { values: number[] }) {
 function SimpleLineChart({ values, benchmark }: { values: number[]; benchmark?: number[] }) {
   const clean = values.length > 1 ? values : [0, 0];
   const bench = benchmark && benchmark.length > 1 ? benchmark : null;
-  const W = 520;
-  const H = 180;
+  const W = 1000;
+  const H = 240;
   const all = bench ? [...clean, ...bench] : clean;
   const min = Math.min(...all, 0);
   const max = Math.max(...all, 0);
@@ -1780,6 +1915,7 @@ function SimpleLineChart({ values, benchmark }: { values: number[]; benchmark?: 
     }).join(" ");
   }
   const zeroY = H - padY - ((0 - min) / span) * (H - padY * 2);
+  const yPct = (value: number) => `${Math.max(0, Math.min(100, (value / H) * 100))}%`;
   const end = clean[clean.length - 1] ?? 0;
   const benchEnd = bench ? bench[bench.length - 1] : null;
   return (
@@ -1789,19 +1925,21 @@ function SimpleLineChart({ values, benchmark }: { values: number[]; benchmark?: 
         <span className="text-quant-green">Strategy {end >= 0 ? "+" : ""}{end.toFixed(3)}%</span>
         {benchEnd !== null && <span>SPY {benchEnd >= 0 ? "+" : ""}{benchEnd.toFixed(3)}%</span>}
       </div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="h-44 w-full" role="img" aria-label="Strategy return compared with SPY benchmark">
-        {[0.25, 0.5, 0.75].map((tick) => {
-          const y = padY + tick * (H - padY * 2);
-          return <line key={tick} x1={padX} x2={W - 16} y1={y} y2={y} className="stroke-quant-line/70" strokeDasharray="3 5" />;
-        })}
-        <line x1={padX} x2={W - 16} y1={zeroY} y2={zeroY} className="stroke-quant-muted/60" strokeDasharray="4 4" />
-        <text x="4" y={padY + 4} className="fill-quant-muted text-[10px]">{max.toFixed(2)}%</text>
-        <text x="4" y={zeroY - 3} className="fill-quant-muted text-[10px]">0%</text>
-        <text x="4" y={H - padY + 4} className="fill-quant-muted text-[10px]">{min.toFixed(2)}%</text>
-        {bench && <path d={pathFor(bench)} fill="none" className="stroke-quant-muted" strokeWidth="2" />}
-        <path d={pathFor(clean)} fill="none" className="stroke-quant-green" strokeWidth="3" />
-        <circle cx={W - 16} cy={H - padY - ((end - min) / span) * (H - padY * 2)} r="3" className="fill-quant-green" />
-      </svg>
+      <div className="relative h-56 overflow-hidden rounded-md border border-quant-line bg-quant-bg/55">
+        <span className="absolute left-3 top-4 text-[0.65rem] font-bold text-quant-muted">{max.toFixed(2)}%</span>
+        <span className="absolute left-3 text-[0.65rem] font-bold text-quant-muted" style={{ top: yPct(zeroY) }}>0%</span>
+        <span className="absolute bottom-4 left-3 text-[0.65rem] font-bold text-quant-muted">{min.toFixed(2)}%</span>
+        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="absolute inset-0 h-full w-full" role="img" aria-label="Strategy return compared with SPY benchmark">
+          {[0.25, 0.5, 0.75].map((tick) => {
+            const y = padY + tick * (H - padY * 2);
+            return <line key={tick} x1={padX} x2={W - 16} y1={y} y2={y} className="stroke-quant-line/70" strokeDasharray="3 5" vectorEffect="non-scaling-stroke" />;
+          })}
+          <line x1={padX} x2={W - 16} y1={zeroY} y2={zeroY} className="stroke-quant-muted/60" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />
+          {bench && <path d={pathFor(bench)} fill="none" className="stroke-quant-muted" strokeWidth="2" vectorEffect="non-scaling-stroke" />}
+          <path d={pathFor(clean)} fill="none" className="stroke-quant-green" strokeWidth="3" vectorEffect="non-scaling-stroke" />
+          <circle cx={W - 16} cy={H - padY - ((end - min) / span) * (H - padY * 2)} r="3" className="fill-quant-green" vectorEffect="non-scaling-stroke" />
+        </svg>
+      </div>
       <div className="flex items-center gap-4 text-[0.65rem] font-bold text-quant-muted">
         <span className="inline-flex items-center gap-1"><span className="h-1.5 w-5 rounded-full bg-quant-green" /> Strategy</span>
         <span className="inline-flex items-center gap-1"><span className="h-1.5 w-5 rounded-full bg-quant-muted" /> SPY benchmark</span>

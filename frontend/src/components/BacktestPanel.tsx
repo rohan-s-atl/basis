@@ -144,8 +144,8 @@ export function BacktestPanel() {
                 <div key={eventType}>
                   <div className="mb-1 flex items-center justify-between text-xs">
                     <span className="font-bold capitalize text-quant-text">{formatLabel(eventType)}</span>
-                    <span className="font-black text-quant-muted">
-                      {stats.accuracy_pct}% | {stats.actionable}/{stats.total} actionable
+                    <span className="font-black text-quant-muted" title={`${stats.correct} correct of ${stats.actionable} actionable signals. ${stats.total - stats.actionable} flat or pending signals are excluded from accuracy.`}>
+                      {stats.accuracy_pct}% accuracy | {stats.correct}/{stats.actionable} correct | {stats.actionable}/{stats.total} actionable
                     </span>
                   </div>
                   <div className="h-1.5 rounded-full bg-quant-bg">
@@ -166,11 +166,11 @@ export function BacktestPanel() {
 
 function PortfolioCurve({ simulation }: { simulation: PortfolioSimulation }) {
   const points = simulation.points;
-  const W = 640;
-  const H = 210;
-  const padLeft = 42;
-  const padRight = 18;
-  const padY = 24;
+  const W = 1000;
+  const H = 260;
+  const padLeft = 54;
+  const padRight = 24;
+  const padY = 28;
   const values = points.flatMap((p) => [p.return_pct, p.benchmark_return_pct]);
   const min = Math.min(...values, 0);
   const max = Math.max(...values, 0);
@@ -185,6 +185,7 @@ function PortfolioCurve({ simulation }: { simulation: PortfolioSimulation }) {
   }
 
   const zeroY = H - padY - ((0 - min) / span) * (H - padY * 2);
+  const yPct = (value: number) => `${Math.max(0, Math.min(100, (value / H) * 100))}%`;
   const strategyEnd = points[points.length - 1]?.return_pct ?? 0;
   const benchmarkEnd = points[points.length - 1]?.benchmark_return_pct ?? 0;
 
@@ -195,20 +196,22 @@ function PortfolioCurve({ simulation }: { simulation: PortfolioSimulation }) {
         <span className="text-quant-green">Strategy {strategyEnd >= 0 ? "+" : ""}{strategyEnd}%</span>
         <span>SPY {benchmarkEnd >= 0 ? "+" : ""}{benchmarkEnd}%</span>
       </div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="h-52 w-full" role="img" aria-label="Portfolio simulation return curve">
-        {[0.25, 0.5, 0.75].map((tick) => {
-          const y = padY + tick * (H - padY * 2);
-          return <line key={tick} x1={padLeft} x2={W - padRight} y1={y} y2={y} className="stroke-quant-line/70" strokeDasharray="3 6" />;
-        })}
-        <line x1={padLeft} x2={W - padRight} y1={zeroY} y2={zeroY} className="stroke-quant-muted/60" strokeDasharray="4 4" />
-        <text x="4" y={padY + 4} className="fill-quant-muted text-[11px]">{max.toFixed(2)}%</text>
-        <text x="4" y={zeroY - 3} className="fill-quant-muted text-[11px]">0%</text>
-        <text x="4" y={H - padY + 4} className="fill-quant-muted text-[11px]">{min.toFixed(2)}%</text>
-        <text x={padLeft} y={H - 4} className="fill-quant-muted text-[11px]">first signal</text>
-        <text x={W - 92} y={H - 4} className="fill-quant-muted text-[11px]">latest signal</text>
-        <path d={pathFor("benchmark_return_pct")} fill="none" className="stroke-quant-muted" strokeWidth="2" />
-        <path d={pathFor("return_pct")} fill="none" className="stroke-quant-green" strokeWidth="3" />
-      </svg>
+      <div className="relative h-72 overflow-hidden rounded-md border border-quant-line bg-quant-bg/55">
+        <span className="absolute left-3 top-4 text-[0.68rem] font-bold text-quant-muted">{max.toFixed(2)}%</span>
+        <span className="absolute left-3 text-[0.68rem] font-bold text-quant-muted" style={{ top: yPct(zeroY) }}>0%</span>
+        <span className="absolute bottom-8 left-3 text-[0.68rem] font-bold text-quant-muted">{min.toFixed(2)}%</span>
+        <span className="absolute bottom-4 left-[3.35rem] text-[0.68rem] font-bold text-quant-muted">first signal</span>
+        <span className="absolute bottom-4 right-6 text-[0.68rem] font-bold text-quant-muted">latest signal</span>
+        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="absolute inset-0 h-full w-full" role="img" aria-label="Portfolio simulation return curve">
+          {[0.25, 0.5, 0.75].map((tick) => {
+            const y = padY + tick * (H - padY * 2);
+            return <line key={tick} x1={padLeft} x2={W - padRight} y1={y} y2={y} className="stroke-quant-line/70" strokeDasharray="3 6" vectorEffect="non-scaling-stroke" />;
+          })}
+          <line x1={padLeft} x2={W - padRight} y1={zeroY} y2={zeroY} className="stroke-quant-muted/60" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />
+          <path d={pathFor("benchmark_return_pct")} fill="none" className="stroke-quant-muted" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+          <path d={pathFor("return_pct")} fill="none" className="stroke-quant-green" strokeWidth="3" vectorEffect="non-scaling-stroke" />
+        </svg>
+      </div>
       <div className="mt-1 flex items-center justify-between text-[0.65rem] font-bold text-quant-muted">
         <span>Signals: {simulation.signals}</span>
         <span className="inline-flex items-center gap-1 text-quant-green"><span className="h-1.5 w-5 rounded-full bg-quant-green" /> Strategy</span>

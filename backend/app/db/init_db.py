@@ -1,3 +1,5 @@
+import hashlib
+
 from sqlalchemy import text
 
 from app.db import models
@@ -15,6 +17,7 @@ _NEW_COLUMNS = [
     ("outcomes", "filtered_label", "INTEGER"),
     ("outcomes", "threshold_used", "FLOAT NOT NULL DEFAULT 0.002"),
     ("events", "text_embedding", "TEXT"),
+    ("events", "content_hash", "VARCHAR(64)"),
 ]
 
 
@@ -26,6 +29,41 @@ def _migrate_columns() -> None:
                 conn.commit()
             except Exception:
                 pass  # column already exists
+
+
+def _migrate_event_content_hash() -> None:
+    """Deduplicate events and establish a unique content_hash index."""
+    with engine.connect() as conn:
+        # Remove duplicate rows, keeping the earliest insert per (timestamp, raw_text, source).
+        # Orphaned predictions for deleted events are acceptable — they were duplicate data.
+        conn.execute(text("""
+            DELETE FROM events
+            WHERE rowid NOT IN (
+                SELECT MIN(rowid)
+                FROM events
+                GROUP BY timestamp, raw_text, source
+            )
+        """))
+        conn.commit()
+
+        # Populate content_hash for any rows that don't have one yet.
+        rows = conn.execute(
+            text("SELECT id, timestamp, raw_text, source FROM events WHERE content_hash IS NULL")
+        ).fetchall()
+        for row in rows:
+            content = f"{row[1]}|{row[2]}|{row[3]}"
+            hash_val = hashlib.sha256(content.encode()).hexdigest()
+            conn.execute(
+                text("UPDATE events SET content_hash = :h WHERE id = :id"),
+                {"h": hash_val, "id": str(row[0])},
+            )
+        conn.commit()
+
+        # Create unique index (idempotent).
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_events_content_hash ON events (content_hash)"
+        ))
+        conn.commit()
 
 
 def _fix_outcomes_nullable_label() -> None:
@@ -68,3 +106,4 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     _migrate_columns()
     _fix_outcomes_nullable_label()
+    _migrate_event_content_hash()

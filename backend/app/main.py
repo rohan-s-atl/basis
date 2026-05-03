@@ -124,7 +124,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 app = FastAPI(
-    title="Macro Event Intelligence Engine",
+    title="Basis",
     lifespan=lifespan,
 )
 
@@ -150,4 +150,4 @@ app.include_router(training.router)
 
 @app.get("/")
 def root() -> dict[str, str]:
-    return {"message": "Macro Event Intelligence Engine running"}
+    return {"message": "Basis running"}

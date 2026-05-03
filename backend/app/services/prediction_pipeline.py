@@ -106,7 +106,7 @@ def _persist_event(
         # Step 2: semantic deduplication via embedding similarity
         from datetime import timedelta
         import json as _json
-        from app.services.embedding_service import embed_text, is_semantic_duplicate
+        from app.services.embedding_service import embed_text, most_similar_duplicate_index
 
         new_embedding = embed_text(raw_text)
         if new_embedding:
@@ -117,16 +117,18 @@ def _persist_event(
                 .all()
             )
             candidate_embeddings = []
+            candidate_events = []
             for candidate in recent:
                 try:
                     candidate_embeddings.append(_json.loads(candidate.text_embedding))
+                    candidate_events.append(candidate)
                 except Exception:
                     continue
 
-            if is_semantic_duplicate(new_embedding, candidate_embeddings):
+            duplicate_index = most_similar_duplicate_index(new_embedding, candidate_embeddings)
+            if duplicate_index is not None:
                 logger.info("Semantic duplicate detected — skipping new event for: %.60s", raw_text)
-                # Return the most recent matching event to reuse its predictions
-                persisted = recent[-1] if recent else None
+                persisted = candidate_events[duplicate_index]
 
         if persisted is None:
             persisted = Event(

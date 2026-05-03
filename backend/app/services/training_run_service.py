@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -13,6 +14,9 @@ logger = logging.getLogger(__name__)
 AUTO_RETRAIN_MIN_GROWTH = 25
 _DRIFT_WINDOW = 30
 _DRIFT_THRESHOLD = 0.10  # 10 percentage-point drop from peak triggers drift alert
+_CONFIDENCE_DRIFT_WINDOW = 50
+_CONFIDENCE_DRIFT_THRESHOLD = 0.20
+_CONFIDENCE_BUCKETS = (0.6, 0.7, 0.8)
 
 
 def save_training_run(
@@ -92,6 +96,7 @@ def should_auto_retrain(db: Session, current_dataset_size: int) -> bool:
 def get_model_health(db: Session) -> dict[str, Any]:
     latest = get_latest_run(db)
     rolling = _rolling_accuracy(db, window=_DRIFT_WINDOW)
+    confidence_drift = _confidence_distribution_drift(db, latest)
 
     if latest is None:
         return {
@@ -99,23 +104,26 @@ def get_model_health(db: Session) -> dict[str, Any]:
             "rolling_accuracy": rolling,
             "peak_accuracy": None,
             "drift_detected": False,
+            "confidence_drift": confidence_drift,
             "last_trained_at": None,
             "dataset_size_at_training": None,
             "retraining_threshold": AUTO_RETRAIN_MIN_GROWTH,
         }
 
     peak = float(latest.accuracy)
-    drift = (
+    accuracy_drift = (
         rolling is not None
         and rolling["samples"] >= 10
         and (peak - rolling["accuracy"]) > _DRIFT_THRESHOLD
     )
+    drift = accuracy_drift or bool(confidence_drift.get("drift_detected"))
 
     return {
         "status": "drift_detected" if drift else "healthy",
         "rolling_accuracy": rolling,
         "peak_accuracy": peak,
         "drift_detected": drift,
+        "confidence_drift": confidence_drift,
         "last_trained_at": latest.trained_at.isoformat(),
         "dataset_size_at_training": latest.dataset_size,
         "retraining_threshold": AUTO_RETRAIN_MIN_GROWTH,
@@ -141,6 +149,83 @@ def _rolling_accuracy(db: Session, *, window: int) -> dict[str, Any] | None:
         "samples": len(labels),
         "window": window,
     }
+
+
+def _confidence_distribution_drift(db: Session, latest: TrainingRun | None) -> dict[str, Any]:
+    if latest is None:
+        return {
+            "drift_detected": False,
+            "psi": 0.0,
+            "threshold": _CONFIDENCE_DRIFT_THRESHOLD,
+            "training": [],
+            "recent": [],
+            "samples": 0,
+        }
+
+    training_confidences = [
+        float(confidence)
+        for (confidence,) in (
+            db.query(Prediction.confidence)
+            .join(Outcome, Outcome.prediction_id == Prediction.id)
+            .filter(
+                Outcome.filtered_label.isnot(None),
+                Prediction.timestamp <= latest.trained_at,
+            )
+            .all()
+        )
+    ]
+    recent_confidences = [
+        float(confidence)
+        for (confidence,) in (
+            db.query(Prediction.confidence)
+            .order_by(Prediction.timestamp.desc())
+            .limit(_CONFIDENCE_DRIFT_WINDOW)
+            .all()
+        )
+    ]
+
+    training_dist = _confidence_distribution(training_confidences)
+    recent_dist = _confidence_distribution(recent_confidences)
+    psi = _population_stability_index(training_dist, recent_dist)
+    enough_samples = len(training_confidences) >= 20 and len(recent_confidences) >= 20
+
+    return {
+        "drift_detected": bool(enough_samples and psi >= _CONFIDENCE_DRIFT_THRESHOLD),
+        "psi": round(psi, 4),
+        "threshold": _CONFIDENCE_DRIFT_THRESHOLD,
+        "training": training_dist,
+        "recent": recent_dist,
+        "samples": len(recent_confidences),
+    }
+
+
+def _confidence_distribution(confidences: list[float]) -> list[float]:
+    if not confidences:
+        return [0.0, 0.0, 0.0, 0.0]
+
+    buckets = [0, 0, 0, 0]
+    for confidence in confidences:
+        if confidence < _CONFIDENCE_BUCKETS[0]:
+            buckets[0] += 1
+        elif confidence < _CONFIDENCE_BUCKETS[1]:
+            buckets[1] += 1
+        elif confidence < _CONFIDENCE_BUCKETS[2]:
+            buckets[2] += 1
+        else:
+            buckets[3] += 1
+
+    total = len(confidences)
+    return [round(count / total, 4) for count in buckets]
+
+
+def _population_stability_index(expected: list[float], actual: list[float]) -> float:
+    epsilon = 0.0001
+    psi = 0.0
+    for expected_share, actual_share in zip(expected, actual):
+        e = max(expected_share, epsilon)
+        a = max(actual_share, epsilon)
+        psi += (a - e) * math.log(a / e)
+    return psi
 
 
 def _run_to_dict(run: TrainingRun) -> dict[str, Any]:

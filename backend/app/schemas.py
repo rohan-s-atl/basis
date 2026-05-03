@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class Article(BaseModel):
@@ -151,6 +151,32 @@ class BacktestSummary(BaseModel):
     recent: list[BacktestSignal]
 
 
+class PortfolioSimulationPoint(BaseModel):
+    index: int
+    label: str
+    equity: float
+    return_pct: float
+    benchmark_equity: float
+    benchmark_return_pct: float
+
+
+class PortfolioSimulation(BaseModel):
+    initial_equity: float
+    final_equity: float
+    total_return_pct: float
+    benchmark_return_pct: float
+    excess_return_pct: float
+    signals: int
+    win_rate_pct: float
+    allocation_pct: float
+    points: list[PortfolioSimulationPoint]
+
+
+class ShapContribution(BaseModel):
+    feature: str
+    shap_value: float
+
+
 class AssetPrediction(BaseModel):
     model_config = {"protected_namespaces": ()}
 
@@ -171,6 +197,7 @@ class AssetPrediction(BaseModel):
     bear_case: str
     drivers: list[str]
     model_version: str
+    shap_contributions: list[ShapContribution] = Field(default_factory=list)
 
 
 class PredictionSummary(BaseModel):

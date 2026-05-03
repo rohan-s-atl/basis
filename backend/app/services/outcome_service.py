@@ -58,6 +58,9 @@ def compute_outcomes(
             )
             if label is None:
                 filtered += 1
+                computed += 1
+                continue
+
             session.add(
                 Outcome(
                     prediction_id=prediction.id,

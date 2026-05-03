@@ -12,7 +12,7 @@ MIN_RECOMMENDED_DATASET_SIZE = 300
 
 
 def export_training_dataset(db: Session, *, limit: int = 10_000) -> dict[str, Any]:
-    rows = _labeled_training_rows(db, limit=limit, chronological=False)
+    rows = _labeled_training_rows(db, limit=limit, chronological=True)
     return _dataset_payload(rows)
 
 
@@ -114,10 +114,12 @@ def _labeled_training_rows(
     limit: int,
     chronological: bool,
 ) -> list[dict[str, Any]]:
-    n_multi = db.query(MultiHorizonOutcome).filter(MultiHorizonOutcome.label.isnot(None)).count()
-    if n_multi > 0:
-        return _multi_horizon_rows(db, limit=limit, chronological=chronological)
-    return _single_horizon_rows(db, limit=limit, chronological=chronological)
+    rows = [
+        *_single_horizon_rows(db, limit=limit, chronological=True),
+        *_multi_horizon_rows(db, limit=limit, chronological=True),
+    ]
+    rows.sort(key=lambda row: row["timestamp"], reverse=not chronological)
+    return rows[:limit]
 
 
 def _single_horizon_rows(

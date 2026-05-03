@@ -1,4 +1,4 @@
-import type { BacktestSummary, EventRecord, MarketHistory, MarketRegime, ModelHealth, PredictionSummary, PriceQuote, SignalAccuracy, TrainingRun, WatchlistImpact } from "../types";
+import type { BacktestSummary, EventRecord, MarketHistory, MarketRegime, ModelHealth, PortfolioSimulation, PredictionSummary, PriceQuote, SignalAccuracy, TrainingDataStats, TrainingDataValidation, TrainingRun, WatchlistImpact } from "../types";
 
 const configuredApiUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
 
@@ -94,6 +94,11 @@ export async function runBacktest(limit = 100): Promise<BacktestSummary> {
   return payload;
 }
 
+export async function fetchPortfolioSimulation(): Promise<PortfolioSimulation> {
+  const { payload } = await requestJson<PortfolioSimulation>("/backtest/portfolio");
+  return payload;
+}
+
 export async function fetchPredictions(limit = 50): Promise<PredictionSummary> {
   const { payload } = await requestJson<PredictionSummary>(`/predictions?limit=${limit}`);
   return payload;
@@ -106,6 +111,16 @@ export async function fetchModelHealth(): Promise<ModelHealth> {
 
 export async function fetchTrainingHistory(limit = 20): Promise<TrainingRun[]> {
   const { payload } = await requestJson<TrainingRun[]>(`/training-history?limit=${limit}`);
+  return payload;
+}
+
+export async function fetchTrainingDataStats(): Promise<TrainingDataStats> {
+  const { payload } = await requestJson<TrainingDataStats>("/training-data/stats");
+  return payload;
+}
+
+export async function fetchTrainingDataValidation(): Promise<TrainingDataValidation> {
+  const { payload } = await requestJson<TrainingDataValidation>("/training-data/validation");
   return payload;
 }
 

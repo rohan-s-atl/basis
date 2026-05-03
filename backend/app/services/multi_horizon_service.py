@@ -81,6 +81,9 @@ def compute_multi_horizon_outcomes(
 
                     raw_return = (exit_price - entry_price) / entry_price
                     label = _label(pred.predicted_direction, raw_return, threshold)
+                    if label is None:
+                        skipped += 1
+                        continue
 
                     session.add(
                         MultiHorizonOutcome(

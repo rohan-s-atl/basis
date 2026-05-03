@@ -93,7 +93,10 @@ class TrainingResult:
 def load_training_data(api_url: str = DEFAULT_EXPORT_URL, *, timeout: float = 30.0) -> TrainingData:
     response = requests.get(api_url, timeout=timeout)
     response.raise_for_status()
-    payload = response.json()
+    return training_data_from_payload(response.json())
+
+
+def training_data_from_payload(payload: dict[str, Any]) -> TrainingData:
     feature_names = list(payload["feature_names"])
     X = pd.DataFrame(payload["features"], columns=feature_names)
     y = pd.Series(payload["labels"], name="label")
@@ -286,6 +289,36 @@ def train_xgboost_model(
     timeout: float = 30.0,
 ) -> TrainingResult:
     data = load_training_data(api_url, timeout=timeout)
+    return train_xgboost_from_data(
+        data,
+        model_path=model_path,
+        calibrated_path=calibrated_path,
+        feature_names_path=feature_names_path,
+    )
+
+
+def train_xgboost_from_payload(
+    payload: dict[str, Any],
+    *,
+    model_path: str | Path = DEFAULT_MODEL_PATH,
+    calibrated_path: str | Path = DEFAULT_CALIBRATED_PATH,
+    feature_names_path: str | Path = DEFAULT_FEATURE_NAMES_PATH,
+) -> TrainingResult:
+    return train_xgboost_from_data(
+        training_data_from_payload(payload),
+        model_path=model_path,
+        calibrated_path=calibrated_path,
+        feature_names_path=feature_names_path,
+    )
+
+
+def train_xgboost_from_data(
+    data: TrainingData,
+    *,
+    model_path: str | Path = DEFAULT_MODEL_PATH,
+    calibrated_path: str | Path = DEFAULT_CALIBRATED_PATH,
+    feature_names_path: str | Path = DEFAULT_FEATURE_NAMES_PATH,
+) -> TrainingResult:
     _validate_training_data(data)
 
     split = int(len(data.X) * TRAIN_FRACTION)

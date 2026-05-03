@@ -79,13 +79,12 @@ def _run_auto_retrain_if_needed() -> None:
 
 def _run_train_model(triggered_by: str = "auto") -> None:
     from ml.model_store import invalidate_cache
-    from ml.train_model import result_to_dict, train_xgboost_model
+    from ml.train_model import result_to_dict, train_xgboost_from_payload
+    from app.services.training_data_service import export_training_dataset
     from app.services.training_run_service import save_training_run
     db = SessionLocal()
     try:
-        result = train_xgboost_model(
-            api_url="http://127.0.0.1:8000/export-training-data",
-        )
+        result = train_xgboost_from_payload(export_training_dataset(db))
         invalidate_cache()
         payload = result_to_dict(result)
         save_training_run(db, payload, triggered_by=triggered_by)

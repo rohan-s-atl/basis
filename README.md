@@ -31,6 +31,9 @@ backend/
       training_data_service.py Training dataset export and validation
       training_run_service.py  Experiment tracking and drift detection
       regime_service.py       Live market regime (VIX, SPY, 10Y yield)
+      historical_market_service.py  Historical price windows for seed training
+      historical_seed_service.py     CSV-to-ML-table historical seeding
+      macro_seed_generator_service.py BLS/FRED macro series event generation
       embedding_service.py    OpenAI text embeddings and semantic deduplication
       ml_scorer.py            XGBoost inference with SHAP and baseline fallback
       baseline_scoring.py     Rule-based fallback scorer
@@ -46,6 +49,9 @@ backend/
     train_model.py            XGBoost training pipeline
     model_store.py            Hot-reload model cache
     models/                   Saved model artifacts (xgboost_model.json, calibrated_model.pkl)
+  scripts/
+    generate_macro_seed_events.py    Build historical event CSVs from BLS/FRED
+    seed_historical_training_data.py Seed historical events, prices, labels
 
 frontend/
   src/
@@ -87,6 +93,7 @@ Every prediction persists a `FeatureSnapshot` with three namespaced feature grou
 - `historical_accuracy_of_event_type`, `rolling_accuracy_of_asset_predictions`
 - `event_asset_avg_return`, `event_asset_accuracy`
 - `vix_level`, `vix_regime_encoded`, `spy_trend`, `rate_level`, `market_regime_encoded`
+- `benchmark_price` for benchmark-relative outcome evaluation when available
 
 ### Model Training
 
@@ -100,11 +107,51 @@ The training pipeline (`ml/train_model.py`) runs on demand or triggers automatic
 
 Artifacts saved: `xgboost_model.json`, `calibrated_model.pkl`, `feature_names.json`. The model store uses mtime-based hot-reload so new models are picked up without restarting the server.
 
+API and background training export the dataset in-process instead of calling the backend through a hardcoded localhost URL. CLI training also records a `training_runs` entry when the configured database is writable.
+
+### Historical Training Bootstrap
+
+The project can bootstrap the ML dataset with historical macro events before waiting for live predictions to mature. This is handled in two stages:
+
+1. **Macro event generation** (`scripts/generate_macro_seed_events.py`) converts official macro time series into seedable event rows.
+   - BLS source, no API key required: CPI (`CUSR0000SA0`) and unemployment (`LNS14000000`)
+   - FRED source, requires `FRED_API_KEY`: CPI (`CPIAUCSL`), unemployment (`UNRATE`), federal funds rate (`FEDFUNDS`)
+   - CPI and employment rows use actual FRED/BLS release-calendar dates when available instead of rough month-based estimates.
+2. **Historical seeding** (`scripts/seed_historical_training_data.py`) reads the generated CSV, fetches yfinance historical ETF prices around each event timestamp, creates `Event`, `Prediction`, and `FeatureSnapshot` records, and labels 1d/3d/5d outcomes in `MultiHorizonOutcome`.
+
+Historical feature snapshots are built only from event-time information and pre-event/as-of market data. Future closes are used only as labels, which keeps the training flow leakage-safe. The seeder also backfills historical market regime features as of the event date: VIX level/regime, SPY 20-day trend, 10Y yield level, and encoded risk regime.
+
+Current seeded baseline after BLS + FRED generation:
+
+| Metric | Value |
+|---|---:|
+| Events | 112 |
+| Predictions | 489 |
+| Multi-horizon labeled outcomes | 862 |
+| Training samples | 920 |
+| Label balance | 51.85% positive / 48.15% negative |
+| Features | 35 |
+| Latest trained accuracy | 48.37% |
+| Latest ROC-AUC | 0.5039 |
+| Walk-forward CV mean | 53.33% |
+
 ### Outcome Labeling
 
-**Single-horizon** (`outcome_service.py`): Fetches current price vs entry price, applies direction label, filters noise below a configurable return threshold.
+**Single-horizon** (`outcome_service.py`): Fetches current price vs entry price, applies direction label, filters noise below a configurable return threshold, assigns a return bucket (`flat`, `small`, `medium`, `large`), and stores benchmark-relative fields when an event-time SPY benchmark price exists.
 
-**Multi-horizon** (`multi_horizon_service.py`): Labels each prediction at 1-day, 3-day, and 5-day horizons using yfinance historical closes. Predictions are grouped by symbol to minimize API calls. A minimum-age filter (8 days) ensures exit prices exist before attempting labeling. Multi-horizon labels are preferred over single-horizon when available, multiplying effective dataset size by up to 3×.
+**Multi-horizon** (`multi_horizon_service.py`): Labels each prediction at 1-day, 3-day, and 5-day horizons using yfinance historical closes. Predictions are grouped by symbol to minimize API calls. A minimum-age filter (8 days) ensures exit prices exist before attempting labeling. Multi-horizon labels are preferred over single-horizon for the same prediction, while single-horizon live rows are still included when no multi-horizon label exists.
+
+### Model Evaluation
+
+`GET /model-evaluation` is the main quality gate for the project. It combines single- and multi-horizon labels without double-counting, then reports:
+
+- overall accuracy and average realized return
+- high-confidence-only performance
+- benchmark-relative accuracy when SPY benchmark returns are available
+- model vs simple baselines: always-up, always-down, event-sentiment, SPY-trend
+- performance by asset, event type, horizon, return bucket, and model version
+- data quality checks: validation issues, duplicate event groups, missing snapshots, unlabeled predictions
+- recommendations that explain whether signals should remain gated
 
 ### Experiment Tracking
 
@@ -155,7 +202,7 @@ Three APScheduler jobs run continuously:
 | Job | Interval | What it does |
 |---|---|---|
 | `_run_ingestion` | Every 15 min | Fetches news, classifies events, runs prediction pipeline |
-| `_run_compute_outcomes` | Every 1 hour | Labels new outcomes, checks auto-retrain threshold |
+| `_run_compute_outcomes` | Every 1 hour | Labels single- and multi-horizon outcomes, checks auto-retrain threshold |
 | `_run_signal_evaluation` | Every 1 hour | Evaluates legacy signal backtest records |
 
 ---
@@ -174,10 +221,10 @@ Built with React 19, TypeScript, Vite, and TailwindCSS. No UI component library 
 |---|---|
 | Breadth | Market breadth metrics, watchlist impact |
 | Alerts | Configurable alert rules with match counts |
-| Predict | Forward predictions with probability and expected move ranges |
+| Predict | Forward predictions ranked by edge score; weak signals are filtered by default |
 | Backtest | Signal outcome analytics by event type, symbol, severity |
 | Accuracy | Historical signal accuracy by event type |
-| **ML** | Model health status, drift indicator, market regime (VIX/SPY/rates), feature importance bars, training history sparkline with Retrain button |
+| **ML** | Model health, model-vs-baseline evaluation, high-confidence performance, data quality, market regime, feature importance, training history, Retrain button |
 
 ---
 
@@ -195,7 +242,7 @@ POST /watchlist/impact                Portfolio/watchlist impact analysis
 GET  /signals/accuracy                Historical signal accuracy by event type
 POST /backtest/run                    Run signal backtest
 GET  /backtest/summary                Backtest analytics and top signals
-GET  /predictions                     Forward-looking asset predictions
+GET  /predictions                     Forward-looking asset predictions with weak-signal filtering
 POST /compute-outcomes                Label outcomes for unlabeled predictions
 POST /compute-multi-horizon-outcomes  Label 1d/3d/5d outcomes
 GET  /export-training-data            Full labeled feature matrix for ML training
@@ -206,6 +253,7 @@ GET  /training-data/confidence-buckets Accuracy by model confidence band
 POST /train-model                     Train XGBoost, save artifacts, log run
 GET  /training-history                All training runs with full metrics
 GET  /model-health                    Rolling accuracy, peak accuracy, drift flag
+GET  /model-evaluation                Baselines, grouped performance, data quality
 ```
 
 ---
@@ -250,6 +298,44 @@ curl -X POST http://127.0.0.1:8000/train-model
 
 Or use the **Retrain** button in the ML tab of the dashboard.
 
+### Seed Historical Training Data
+
+Use the project virtualenv for the historical scripts so the same dependency set and SQLite database path are used as the backend.
+
+Generate a no-key BLS historical macro seed file:
+
+```bash
+cd backend
+..\.venv\Scripts\python.exe scripts\generate_macro_seed_events.py --source bls --start 2020-01-01 --end 2024-12-31 --output app\data\historical_events.bls.generated.csv
+```
+
+Generate a FRED historical macro seed file after setting `FRED_API_KEY`:
+
+```bash
+..\.venv\Scripts\python.exe scripts\generate_macro_seed_events.py --source fred --start 2020-01-01 --end 2024-12-31 --output app\data\historical_events.fred.generated.csv
+```
+
+Seed generated events into the ML tables:
+
+```bash
+..\.venv\Scripts\python.exe scripts\seed_historical_training_data.py --file app\data\historical_events.bls.generated.csv
+..\.venv\Scripts\python.exe scripts\seed_historical_training_data.py --file app\data\historical_events.fred.generated.csv
+```
+
+Use `--refresh-existing` when regenerated calendars or historical regime features should rebuild existing seeded snapshots and labels:
+
+```bash
+..\.venv\Scripts\python.exe scripts\seed_historical_training_data.py --file app\data\historical_events.bls.generated.csv --refresh-existing
+..\.venv\Scripts\python.exe scripts\seed_historical_training_data.py --file app\data\historical_events.fred.generated.csv --refresh-existing
+```
+
+Then start the backend and retrain:
+
+```bash
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+curl -X POST "http://127.0.0.1:8000/train-model?limit=50000"
+```
+
 ---
 
 ## Environment Variables
@@ -261,6 +347,7 @@ NEWS_API_KEY=
 NEWS_API_URL=https://newsapi.org/v2/everything
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-4o-mini
+FRED_API_KEY=                         # optional; enables FRED historical seed generation
 DATABASE_URL=                          # leave blank for local SQLite
 OUTCOME_NOISE_THRESHOLD=0.0001         # minimum return to count as a label
 NEWS_CACHE_TTL_SECONDS=900
@@ -280,6 +367,7 @@ VITE_API_BASE_URL=http://127.0.0.1:8000
 
 - **Full-stack ML product design** — end-to-end pipeline from raw news to trained model to live UI
 - **Feature engineering** — event, market, derived, interaction, regime, and embedding features
+- **Historical data bootstrapping** — official BLS/FRED macro series converted into event-conditioned training rows
 - **XGBoost with SHAP** — tree-based classification with feature attribution and Platt calibration
 - **Time-series ML discipline** — walk-forward CV, no data leakage, chronological splits
 - **Multi-horizon labeling** — outcome labels at 1d, 3d, 5d horizons from historical market data

@@ -93,7 +93,10 @@ class TrainingResult:
 def load_training_data(api_url: str = DEFAULT_EXPORT_URL, *, timeout: float = 30.0) -> TrainingData:
     response = requests.get(api_url, timeout=timeout)
     response.raise_for_status()
-    payload = response.json()
+    return training_data_from_payload(response.json())
+
+
+def training_data_from_payload(payload: dict[str, Any]) -> TrainingData:
     feature_names = list(payload["feature_names"])
     X = pd.DataFrame(payload["features"], columns=feature_names)
     y = pd.Series(payload["labels"], name="label")
@@ -280,12 +283,16 @@ def feature_importance_frame(model: XGBClassifier, feature_names: list[str]) -> 
 def train_xgboost_model(
     *,
     api_url: str = DEFAULT_EXPORT_URL,
+    dataset: dict[str, Any] | None = None,
     model_path: str | Path = DEFAULT_MODEL_PATH,
     calibrated_path: str | Path = DEFAULT_CALIBRATED_PATH,
     feature_names_path: str | Path = DEFAULT_FEATURE_NAMES_PATH,
     timeout: float = 30.0,
 ) -> TrainingResult:
-    data = load_training_data(api_url, timeout=timeout)
+    data = training_data_from_payload(dataset) if dataset is not None else load_training_data(
+        api_url,
+        timeout=timeout,
+    )
     _validate_training_data(data)
 
     split = int(len(data.X) * TRAIN_FRACTION)
@@ -456,7 +463,28 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = _parse_args()
-    train_xgboost_model(api_url=args.api_url, model_path=args.model_path, timeout=args.timeout)
+    result = train_xgboost_model(
+        api_url=args.api_url,
+        model_path=args.model_path,
+        timeout=args.timeout,
+    )
+    _record_cli_training_run(result)
+
+
+def _record_cli_training_run(result: TrainingResult) -> None:
+    try:
+        from app.db.init_db import init_db
+        from app.db.session import SessionLocal
+        from app.services.training_run_service import save_training_run
+
+        init_db()
+        db = SessionLocal()
+        try:
+            save_training_run(db, result_to_dict(result), triggered_by="cli")
+        finally:
+            db.close()
+    except Exception as exc:
+        print(f"Training run history not recorded: {exc}")
 
 
 if __name__ == "__main__":

@@ -162,6 +162,9 @@ class AssetPrediction(BaseModel):
     severity: str
     confidence: float
     probability: float
+    ranking_score: float
+    is_actionable: bool
+    filter_reason: str | None
     horizon: str
     expected_move_pct: float
     expected_move_low_pct: float
@@ -178,6 +181,9 @@ class PredictionSummary(BaseModel):
 
     model_version: str
     count: int
+    total_considered: int
+    weak_filtered: int
+    min_quality: float
     predictions: list[AssetPrediction]
 
 

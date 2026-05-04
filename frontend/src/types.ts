@@ -177,6 +177,9 @@ export type AssetPrediction = {
   severity: Severity;
   confidence: number;
   probability: number;
+  ranking_score: number;
+  is_actionable: boolean;
+  filter_reason: string | null;
   horizon: string;
   expected_move_pct: number;
   expected_move_low_pct: number;
@@ -191,6 +194,9 @@ export type AssetPrediction = {
 export type PredictionSummary = {
   model_version: string;
   count: number;
+  total_considered: number;
+  weak_filtered: number;
+  min_quality: number;
   predictions: AssetPrediction[];
 };
 
@@ -235,6 +241,37 @@ export type ModelHealth = {
   last_trained_at: string | null;
   dataset_size_at_training: number | null;
   retraining_threshold: number;
+};
+
+export type EvaluationMetric = {
+  samples: number;
+  accuracy: number;
+  avg_return?: number;
+};
+
+export type ModelEvaluation = {
+  sample_count: number;
+  overall: EvaluationMetric;
+  high_confidence: EvaluationMetric;
+  benchmark_relative: {
+    samples: number;
+    accuracy: number;
+  };
+  baselines: Record<string, EvaluationMetric>;
+  by_asset: Record<string, EvaluationMetric>;
+  by_event_type: Record<string, EvaluationMetric>;
+  by_horizon: Record<string, EvaluationMetric>;
+  by_return_bucket: Record<string, EvaluationMetric>;
+  by_model_version: Record<string, EvaluationMetric>;
+  data_quality: {
+    dataset_samples: number;
+    feature_count: number;
+    issues: string[];
+    duplicate_event_groups: number;
+    predictions_missing_snapshots: number;
+    unlabeled_predictions: number;
+  };
+  recommendations: string[];
 };
 
 export type MarketRegime = {

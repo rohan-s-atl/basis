@@ -6,7 +6,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.db.models import Outcome, Prediction, TrainingRun
+from app.db.models import MultiHorizonOutcome, Outcome, Prediction, TrainingRun
 
 logger = logging.getLogger(__name__)
 
@@ -123,16 +123,43 @@ def get_model_health(db: Session) -> dict[str, Any]:
 
 
 def _rolling_accuracy(db: Session, *, window: int) -> dict[str, Any] | None:
-    labels = [
-        int(label)
-        for (label,) in (
-            db.query(Outcome.filtered_label)
-            .join(Prediction, Prediction.id == Outcome.prediction_id)
-            .filter(Outcome.filtered_label.isnot(None))
-            .order_by(Prediction.timestamp.desc())
-            .limit(window)
+    multi_rows = [
+        (timestamp, int(label))
+        for timestamp, label in (
+            db.query(Prediction.timestamp, MultiHorizonOutcome.label)
+            .join(MultiHorizonOutcome, MultiHorizonOutcome.prediction_id == Prediction.id)
+            .filter(MultiHorizonOutcome.label.isnot(None))
             .all()
         )
+    ]
+    multi_prediction_ids = [
+        prediction_id
+        for (prediction_id,) in (
+            db.query(MultiHorizonOutcome.prediction_id)
+            .filter(MultiHorizonOutcome.label.isnot(None))
+            .distinct()
+            .all()
+        )
+    ]
+    single_rows = [
+        (timestamp, int(label))
+        for timestamp, label in (
+            db.query(Prediction.timestamp, Outcome.filtered_label)
+            .join(Outcome, Outcome.prediction_id == Prediction.id)
+            .filter(
+                Outcome.filtered_label.isnot(None),
+                ~Prediction.id.in_(multi_prediction_ids),
+            )
+            .all()
+        )
+    ]
+    labels = [
+        label
+        for _, label in sorted(
+            [*multi_rows, *single_rows],
+            key=lambda row: row[0],
+            reverse=True,
+        )[:window]
     ]
     if not labels:
         return None

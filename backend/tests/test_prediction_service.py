@@ -46,9 +46,14 @@ def test_generate_predictions_ranks_asset_signals() -> None:
         db.close()
 
     assert payload["count"] == 1
+    assert payload["total_considered"] == 1
+    assert payload["weak_filtered"] == 0
     prediction = payload["predictions"][0]
     assert prediction["symbol"] == "XLE"
     assert prediction["impact_direction"] == "positive"
     assert prediction["expected_move_pct"] > 0
     assert prediction["probability"] > 0.5
+    assert prediction["ranking_score"] > prediction["probability"] * 0.4
+    assert prediction["is_actionable"] is True
+    assert prediction["filter_reason"] is None
     assert prediction["drivers"]

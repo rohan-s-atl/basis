@@ -1,25 +1,28 @@
 import { useCallback, useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle, RefreshCw, TrendingDown, TrendingUp } from "lucide-react";
 
-import { fetchMarketRegime, fetchModelHealth, fetchTrainingHistory, triggerTrainModel } from "../lib/api";
-import type { MarketRegime, ModelHealth, TrainingRun } from "../types";
+import { fetchMarketRegime, fetchModelEvaluation, fetchModelHealth, fetchTrainingHistory, triggerTrainModel } from "../lib/api";
+import type { EvaluationMetric, MarketRegime, ModelEvaluation, ModelHealth, TrainingRun } from "../types";
 
 export function MLIntelligencePanel() {
   const [health, setHealth] = useState<ModelHealth | null>(null);
+  const [evaluation, setEvaluation] = useState<ModelEvaluation | null>(null);
   const [history, setHistory] = useState<TrainingRun[]>([]);
   const [regime, setRegime] = useState<MarketRegime | null>(null);
   const [isRetraining, setIsRetraining] = useState(false);
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
-    const [h, hist, r] = await Promise.allSettled([
+    const [h, hist, r, evalResult] = await Promise.allSettled([
       fetchModelHealth(),
       fetchTrainingHistory(10),
       fetchMarketRegime(),
+      fetchModelEvaluation(),
     ]);
     if (h.status === "fulfilled") setHealth(h.value);
     if (hist.status === "fulfilled") setHistory(hist.value);
     if (r.status === "fulfilled") setRegime(r.value);
+    if (evalResult.status === "fulfilled") setEvaluation(evalResult.value);
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -119,6 +122,58 @@ export function MLIntelligencePanel() {
                 month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"
               })}
             </p>
+          )}
+        </div>
+      )}
+
+      {evaluation && (
+        <div className="mb-2 rounded-lg border border-quant-line bg-quant-panel2 p-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <p className="quant-eyebrow">Evaluation</p>
+            <span className="text-[0.65rem] text-quant-muted">{evaluation.sample_count} labeled samples</span>
+          </div>
+
+          <div className="mb-3 grid grid-cols-3 gap-2">
+            <EvalStat label="Model" metric={evaluation.overall} />
+            <EvalStat label="High conf." metric={evaluation.high_confidence} />
+            <EvalStat
+              label="Vs SPY"
+              metric={{
+                samples: evaluation.benchmark_relative.samples,
+                accuracy: evaluation.benchmark_relative.accuracy
+              }}
+            />
+          </div>
+
+          <div className="mb-3 rounded-md border border-quant-line bg-quant-bg/50 p-2">
+            <div className="mb-2 flex items-center justify-between text-[0.65rem] font-bold uppercase text-quant-muted">
+              <span>Model vs baselines</span>
+              <span>accuracy</span>
+            </div>
+            <div className="grid gap-1.5">
+              {Object.entries(evaluation.baselines).map(([name, metric]) => (
+                <BarMetric key={name} label={prettifyFeature(name)} metric={metric} />
+              ))}
+            </div>
+          </div>
+
+          <div className="mb-3 grid grid-cols-2 gap-2">
+            <MiniGroup title="By horizon" rows={evaluation.by_horizon} />
+            <MiniGroup title="Return buckets" rows={evaluation.by_return_bucket} />
+          </div>
+
+          {evaluation.data_quality.issues.length > 0 && (
+            <div className="mb-2 rounded-md border border-quant-yellow/30 bg-quant-yellow/10 p-2 text-[0.68rem] font-semibold text-quant-yellow">
+              {evaluation.data_quality.issues.slice(0, 2).join(" | ")}
+            </div>
+          )}
+
+          {evaluation.recommendations.length > 0 && (
+            <div className="grid gap-1 text-[0.68rem] text-quant-muted">
+              {evaluation.recommendations.slice(0, 3).map((item) => (
+                <p key={item}>{item}</p>
+              ))}
+            </div>
           )}
         </div>
       )}
@@ -250,6 +305,62 @@ function prettifyFeature(name: string): string {
     .replace(/_/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase())
     .slice(0, 30);
+}
+
+function EvalStat({ label, metric }: { label: string; metric: EvaluationMetric }) {
+  return (
+    <div className="rounded-md border border-quant-line bg-quant-bg/50 p-2">
+      <p className="text-[0.62rem] font-bold uppercase text-quant-muted">{label}</p>
+      <strong className={`text-sm font-black ${accuracyColor(metric.accuracy)}`}>
+        {(metric.accuracy * 100).toFixed(1)}%
+      </strong>
+      <p className="text-[0.6rem] text-quant-muted">{metric.samples} samples</p>
+    </div>
+  );
+}
+
+function BarMetric({ label, metric }: { label: string; metric: EvaluationMetric }) {
+  return (
+    <div>
+      <div className="mb-0.5 flex items-center justify-between text-[0.67rem]">
+        <span className="font-semibold text-quant-text">{label}</span>
+        <span className={`font-black ${accuracyColor(metric.accuracy)}`}>
+          {(metric.accuracy * 100).toFixed(1)}%
+        </span>
+      </div>
+      <div className="h-1 rounded-full bg-quant-panel">
+        <div
+          className="h-full rounded-full bg-gradient-to-r from-quant-blue to-quant-green"
+          style={{ width: `${Math.max(3, metric.accuracy * 100)}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function MiniGroup({ title, rows }: { title: string; rows: Record<string, EvaluationMetric> }) {
+  const entries = Object.entries(rows).slice(0, 4);
+  return (
+    <div className="rounded-md border border-quant-line bg-quant-bg/50 p-2">
+      <p className="quant-eyebrow mb-1.5">{title}</p>
+      <div className="grid gap-1">
+        {entries.map(([name, metric]) => (
+          <div key={name} className="flex items-center justify-between gap-2 text-[0.65rem]">
+            <span className="truncate text-quant-muted">{prettifyFeature(name)}</span>
+            <span className={`shrink-0 font-black ${accuracyColor(metric.accuracy)}`}>
+              {(metric.accuracy * 100).toFixed(0)}%
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function accuracyColor(value: number): string {
+  if (value >= 0.58) return "text-quant-green";
+  if (value >= 0.48) return "text-quant-yellow";
+  return "text-quant-red";
 }
 
 function AccuracySparkline({ runs }: { runs: TrainingRun[] }) {

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.db.models import FeatureSnapshot, MultiHorizonOutcome, Prediction
 from app.db.session import SessionLocal
+from app.services.outcome_label_service import benchmark_metrics, directional_label, return_bucket
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,7 @@ def compute_multi_horizon_outcomes(
                 logger.warning("History fetch failed for %s: %s", symbol, exc)
                 skipped += len(symbol_preds) * len(HORIZONS)
                 continue
+            benchmark_hist = _fetch_benchmark_history(start_date, end_date)
 
             for pred in symbol_preds:
                 snapshot = pred.feature_snapshot
@@ -80,7 +82,24 @@ def compute_multi_horizon_outcomes(
                         continue
 
                     raw_return = (exit_price - entry_price) / entry_price
-                    label = _label(pred.predicted_direction, raw_return, threshold)
+                    label = directional_label(
+                        pred.predicted_direction,
+                        raw_return,
+                        noise_threshold=threshold,
+                    )
+                    benchmark_return = _benchmark_return(
+                        pred,
+                        snapshot,
+                        benchmark_hist,
+                        target=target,
+                        raw_return=raw_return,
+                    )
+                    benchmark = benchmark_metrics(
+                        predicted_direction=pred.predicted_direction,
+                        raw_return=raw_return,
+                        benchmark_return=benchmark_return,
+                        noise_threshold=threshold,
+                    )
 
                     session.add(
                         MultiHorizonOutcome(
@@ -90,6 +109,10 @@ def compute_multi_horizon_outcomes(
                             exit_price=round(exit_price, 8),
                             raw_return=round(raw_return, 8),
                             return_magnitude=round(abs(raw_return), 8),
+                            return_bucket=return_bucket(raw_return),
+                            benchmark_return=benchmark["benchmark_return"],
+                            excess_return=benchmark["excess_return"],
+                            benchmark_label=benchmark["benchmark_label"],
                             label=label,
                             threshold_used=threshold,
                             computed_at=datetime.now(UTC),
@@ -137,6 +160,14 @@ def _fetch_history(symbol: str, start: date, end: date) -> dict[date, float]:
     return {idx.date(): float(row["Close"]) for idx, row in hist.iterrows()}
 
 
+def _fetch_benchmark_history(start: date, end: date) -> dict[date, float]:
+    try:
+        return _fetch_history("SPY", start, end)
+    except Exception as exc:
+        logger.debug("Benchmark history fetch failed: %s", exc)
+        return {}
+
+
 def _price_at(hist: dict[date, float], target: date) -> float | None:
     for offset in range(5):
         price = hist.get(target + timedelta(days=offset))
@@ -152,11 +183,25 @@ def _entry_price(snapshot: FeatureSnapshot) -> float | None:
         return None
 
 
-def _label(predicted_direction: str, actual_return: float, threshold: float) -> int | None:
-    if abs(actual_return) < threshold:
+def _benchmark_return(
+    pred: Prediction,
+    snapshot: FeatureSnapshot,
+    benchmark_hist: dict[date, float],
+    *,
+    target: date,
+    raw_return: float,
+) -> float | None:
+    if pred.asset.upper() == "SPY":
+        return raw_return
+
+    try:
+        entry_price = float((snapshot.derived_features or {}).get("benchmark_price"))
+    except (TypeError, ValueError):
         return None
-    if predicted_direction == "up" and actual_return > 0:
-        return 1
-    if predicted_direction == "down" and actual_return < 0:
-        return 1
-    return 0
+    if entry_price <= 0:
+        return None
+
+    exit_price = _price_at(benchmark_hist, target)
+    if exit_price is None:
+        return None
+    return (exit_price - entry_price) / entry_price

@@ -45,17 +45,24 @@ def _run_signal_evaluation() -> None:
 
 
 def _run_compute_outcomes() -> None:
+    from app.services.multi_horizon_service import compute_multi_horizon_outcomes
     from app.services.outcome_service import compute_outcomes
     db = SessionLocal()
     try:
-        result = compute_outcomes(db=db)
+        single_result = compute_outcomes(db=db)
+        multi_result = compute_multi_horizon_outcomes(db=db)
         logger.info(
-            "Outcome computation complete: computed=%d skipped=%d filtered=%d",
-            result["computed"],
-            result["skipped"],
-            result["filtered"],
+            (
+                "Outcome computation complete: single=%d skipped=%d filtered=%d "
+                "multi=%d multi_skipped=%d"
+            ),
+            single_result["computed"],
+            single_result["skipped"],
+            single_result["filtered"],
+            multi_result["computed"],
+            multi_result["skipped"],
         )
-        if result["computed"] > 0:
+        if single_result["computed"] > 0 or multi_result["computed"] > 0:
             _run_auto_retrain_if_needed()
     except Exception as exc:
         logger.error("Outcome computation failed: %s", exc)
@@ -80,12 +87,12 @@ def _run_auto_retrain_if_needed() -> None:
 def _run_train_model(triggered_by: str = "auto") -> None:
     from ml.model_store import invalidate_cache
     from ml.train_model import result_to_dict, train_xgboost_model
+    from app.services.training_data_service import export_training_dataset
     from app.services.training_run_service import save_training_run
     db = SessionLocal()
     try:
-        result = train_xgboost_model(
-            api_url="http://127.0.0.1:8000/export-training-data",
-        )
+        dataset = export_training_dataset(db, limit=50_000)
+        result = train_xgboost_model(dataset=dataset)
         invalidate_cache()
         payload = result_to_dict(result)
         save_training_run(db, payload, triggered_by=triggered_by)

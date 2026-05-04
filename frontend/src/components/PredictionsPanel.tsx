@@ -60,7 +60,7 @@ export function PredictionsPanel() {
           <div className="grid grid-cols-3 gap-2">
             <Metric label="Signals" value={summary?.count.toString() ?? "0"} />
             <Metric label="Top Prob." value={`${Math.round(predictions[0].probability * 100)}%`} />
-            <Metric label="Model" value={summary?.model_version ?? "v1"} icon />
+            <Metric label="Filtered" value={summary?.weak_filtered.toString() ?? "0"} icon />
           </div>
 
           <div className="grid min-h-[22.5rem] grid-cols-[0.82fr_1.18fr] gap-3">
@@ -84,7 +84,7 @@ export function PredictionsPanel() {
                   <p className="line-clamp-2 text-xs text-quant-muted">{prediction.title}</p>
                   <div className="mt-2 flex items-center justify-between text-[0.68rem] font-bold text-quant-muted">
                     <span>{prediction.horizon}</span>
-                    <span>{Math.round(prediction.probability * 100)}% probability</span>
+                    <span>{Math.round(prediction.ranking_score * 100)} edge</span>
                   </div>
                 </button>
               ))}
@@ -108,6 +108,8 @@ export function PredictionsPanel() {
                   <SmallStat label="Range" value={`${selected.expected_move_low_pct}% to ${selected.expected_move_high_pct}%`} />
                   <SmallStat label="Horizon" value={selected.horizon} />
                   <SmallStat label="Probability" value={`${Math.round(selected.probability * 100)}%`} />
+                  <SmallStat label="Edge score" value={`${Math.round(selected.ranking_score * 100)}%`} />
+                  <SmallStat label="Model" value={selected.model_version} />
                 </div>
 
                 <div className="mb-3 rounded-lg border border-quant-line bg-quant-bg/60 p-2">

@@ -43,6 +43,10 @@ def test_prediction_pipeline_stores_features_and_exports_labeled_dataset(monkeyp
         "app.services.prediction_pipeline.fetch_price",
         lambda symbol: {"symbol": symbol, "price": 100.0, "history": [99.0, 100.0]},
     )
+    monkeypatch.setattr(
+        "app.services.prediction_pipeline.score_with_ml_model",
+        lambda event_features, market_features, derived_features, fallback: (fallback, "baseline-v1"),
+    )
 
     try:
         predictions = run_prediction_pipeline(
@@ -90,7 +94,7 @@ def test_prediction_pipeline_stores_features_and_exports_labeled_dataset(monkeyp
     assert "derived_rolling_accuracy_of_asset_predictions" in feature_map
     assert "derived_event_asset_avg_return" in feature_map
     assert "derived_event_asset_accuracy" in feature_map
-    assert feature_map["outcome_return_magnitude"] == 0.1
+    assert "outcome_return_magnitude" not in feature_map
     assert all(isinstance(value, (int, float)) for value in dataset["features"][0])
 
     split = get_train_test_split(db_session)
@@ -100,7 +104,7 @@ def test_prediction_pipeline_stores_features_and_exports_labeled_dataset(monkeyp
 
     assert split["train"]["labels"] == []
     assert split["test"]["labels"] == [1]
-    assert buckets["0.8+"]["samples"] == 1
+    assert sum(bucket["samples"] for bucket in buckets.values()) == 1
     assert report["num_samples"] == 1
     assert stats["num_samples"] == 1
 

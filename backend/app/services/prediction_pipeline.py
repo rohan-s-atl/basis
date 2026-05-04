@@ -6,7 +6,7 @@ from typing import Any
 from sqlalchemy.orm import Session, object_session
 
 from app.core.config import settings
-from app.db.models import Event, FeatureSnapshot, Outcome, Prediction
+from app.db.models import Event, FeatureSnapshot, MultiHorizonOutcome, Outcome, Prediction
 from app.db.session import SessionLocal
 from app.services.baseline_scoring import score_baseline_prediction
 from app.services.ml_scorer import score_with_ml_model
@@ -166,6 +166,7 @@ def _store_predictions_for_assets(
     except Exception as exc:
         logger.warning("Regime fetch failed, using defaults: %s", exc)
         regime = {}
+    benchmark_price = _current_benchmark_price()
 
     for raw_symbol in symbols:
         symbol = str(raw_symbol).upper()
@@ -229,6 +230,8 @@ def _store_predictions_for_assets(
             rate_level=float(regime.get("rate_level", 4.0)),
             market_regime_encoded=int(regime.get("market_regime_encoded", 1)),
         )
+        if benchmark_price is not None:
+            derived_features["benchmark_price"] = benchmark_price
 
         final_prediction, effective_model_version = score_with_ml_model(
             event_features,
@@ -243,6 +246,7 @@ def _store_predictions_for_assets(
             predicted_direction=final_prediction.predicted_direction,
             confidence=final_prediction.confidence,
             horizon=horizon,
+            model_version=effective_model_version,
             timestamp=prediction_timestamp,
         )
         db.add(prediction)
@@ -277,21 +281,17 @@ def _prediction_exists(db: Session, event: Event, symbol: str, horizon: str) -> 
     )
 
 
+def _current_benchmark_price() -> float | None:
+    try:
+        benchmark = fetch_price("SPY")
+        return float(benchmark["price"])
+    except Exception as exc:
+        logger.debug("Benchmark entry price fetch failed: %s", exc)
+        return None
+
+
 def _historical_accuracy_of_event_type(db: Session, event_type: str, *, before: datetime) -> float:
-    labels = [
-        int(label)
-        for (label,) in (
-            db.query(Outcome.filtered_label)
-            .join(Prediction, Prediction.id == Outcome.prediction_id)
-            .join(Event, Event.id == Prediction.event_id)
-            .filter(
-                Event.event_type == event_type,
-                Prediction.timestamp < before,
-                Outcome.filtered_label.isnot(None),
-            )
-            .all()
-        )
-    ]
+    labels = _historical_labels(db, before=before, event_type=event_type)
     return _accuracy_or_prior(labels)
 
 
@@ -302,21 +302,7 @@ def _rolling_accuracy_of_asset_predictions(
     before: datetime,
     window: int = 50,
 ) -> float:
-    labels = [
-        int(label)
-        for (label,) in (
-            db.query(Outcome.filtered_label)
-            .join(Prediction, Prediction.id == Outcome.prediction_id)
-            .filter(
-                Prediction.asset == asset.upper(),
-                Prediction.timestamp < before,
-                Outcome.filtered_label.isnot(None),
-            )
-            .order_by(Prediction.timestamp.desc())
-            .limit(window)
-            .all()
-        )
-    ]
+    labels = _historical_labels(db, before=before, asset=asset.upper(), limit=window)
     return _accuracy_or_prior(labels)
 
 
@@ -354,21 +340,7 @@ def _event_asset_avg_return(
     *,
     before: datetime,
 ) -> float:
-    returns = [
-        float(return_value)
-        for (return_value,) in (
-            db.query(Outcome.raw_return)
-            .join(Prediction, Prediction.id == Outcome.prediction_id)
-            .join(Event, Event.id == Prediction.event_id)
-            .filter(
-                Prediction.asset == asset.upper(),
-                Event.event_type == event_type,
-                Prediction.timestamp < before,
-                Outcome.filtered_label.isnot(None),
-            )
-            .all()
-        )
-    ]
+    returns = _historical_returns(db, before=before, asset=asset.upper(), event_type=event_type)
     if returns:
         return sum(returns) / len(returns)
     return _global_avg_return(db, before=before)
@@ -381,58 +353,118 @@ def _event_asset_accuracy(
     *,
     before: datetime,
 ) -> float:
-    labels = [
-        int(label)
-        for (label,) in (
-            db.query(Outcome.filtered_label)
-            .join(Prediction, Prediction.id == Outcome.prediction_id)
-            .join(Event, Event.id == Prediction.event_id)
-            .filter(
-                Prediction.asset == asset.upper(),
-                Event.event_type == event_type,
-                Prediction.timestamp < before,
-                Outcome.filtered_label.isnot(None),
-            )
-            .all()
-        )
-    ]
+    labels = _historical_labels(db, before=before, asset=asset.upper(), event_type=event_type)
     if labels:
         return sum(labels) / len(labels)
     return _global_accuracy(db, before=before)
 
 
 def _global_avg_return(db: Session, *, before: datetime) -> float:
-    returns = [
-        float(return_value)
-        for (return_value,) in (
-            db.query(Outcome.raw_return)
-            .join(Prediction, Prediction.id == Outcome.prediction_id)
-            .filter(
-                Prediction.timestamp < before,
-                Outcome.filtered_label.isnot(None),
-            )
-            .all()
-        )
-    ]
+    returns = _historical_returns(db, before=before)
     if not returns:
         return 0.0
     return sum(returns) / len(returns)
 
 
 def _global_accuracy(db: Session, *, before: datetime) -> float:
-    labels = [
-        int(label)
-        for (label,) in (
-            db.query(Outcome.filtered_label)
-            .join(Prediction, Prediction.id == Outcome.prediction_id)
-            .filter(
-                Prediction.timestamp < before,
-                Outcome.filtered_label.isnot(None),
-            )
+    labels = _historical_labels(db, before=before)
+    return _accuracy_or_prior(labels)
+
+
+def _historical_labels(
+    db: Session,
+    *,
+    before: datetime,
+    asset: str | None = None,
+    event_type: str | None = None,
+    limit: int | None = None,
+) -> list[int]:
+    records = [
+        (timestamp, int(label))
+        for timestamp, label in _historical_metric_records(
+            db,
+            before=before,
+            metric="label",
+            asset=asset,
+            event_type=event_type,
+        )
+    ]
+    records.sort(key=lambda row: row[0], reverse=True)
+    if limit is not None:
+        records = records[:limit]
+    return [label for _, label in records]
+
+
+def _historical_returns(
+    db: Session,
+    *,
+    before: datetime,
+    asset: str | None = None,
+    event_type: str | None = None,
+) -> list[float]:
+    return [
+        float(value)
+        for _, value in _historical_metric_records(
+            db,
+            before=before,
+            metric="return",
+            asset=asset,
+            event_type=event_type,
+        )
+    ]
+
+
+def _historical_metric_records(
+    db: Session,
+    *,
+    before: datetime,
+    metric: str,
+    asset: str | None,
+    event_type: str | None,
+) -> list[tuple[datetime, int | float]]:
+    multi_value = MultiHorizonOutcome.label if metric == "label" else MultiHorizonOutcome.raw_return
+    single_value = Outcome.filtered_label if metric == "label" else Outcome.raw_return
+
+    multi_query = (
+        db.query(Prediction.timestamp, multi_value)
+        .join(MultiHorizonOutcome, MultiHorizonOutcome.prediction_id == Prediction.id)
+        .join(Event, Event.id == Prediction.event_id)
+        .filter(
+            Prediction.timestamp < before,
+            MultiHorizonOutcome.label.isnot(None),
+        )
+    )
+    single_query = (
+        db.query(Prediction.timestamp, single_value)
+        .join(Outcome, Outcome.prediction_id == Prediction.id)
+        .join(Event, Event.id == Prediction.event_id)
+        .filter(
+            Prediction.timestamp < before,
+            Outcome.filtered_label.isnot(None),
+            ~Prediction.id.in_(_multi_labeled_prediction_ids(db)),
+        )
+    )
+
+    if asset is not None:
+        multi_query = multi_query.filter(Prediction.asset == asset.upper())
+        single_query = single_query.filter(Prediction.asset == asset.upper())
+    if event_type is not None:
+        multi_query = multi_query.filter(Event.event_type == event_type)
+        single_query = single_query.filter(Event.event_type == event_type)
+
+    return [*multi_query.all(), *single_query.all()]
+
+
+def _multi_labeled_prediction_ids(db: Session) -> list[Any]:
+    return [
+        prediction_id
+        for (prediction_id,) in (
+            db.query(MultiHorizonOutcome.prediction_id)
+            .filter(MultiHorizonOutcome.label.isnot(None))
+            .distinct()
             .all()
         )
     ]
-    return _accuracy_or_prior(labels)
 
 
 def _assets_for_event(article: dict[str, Any], classification: dict[str, Any]) -> list[str]:

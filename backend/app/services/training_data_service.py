@@ -12,7 +12,7 @@ MIN_RECOMMENDED_DATASET_SIZE = 300
 
 
 def export_training_dataset(db: Session, *, limit: int = 10_000) -> dict[str, Any]:
-    rows = _labeled_training_rows(db, limit=limit, chronological=False)
+    rows = _labeled_training_rows(db, limit=limit, chronological=True)
     return _dataset_payload(rows)
 
 
@@ -39,12 +39,7 @@ def get_confidence_analysis(db: Session) -> dict[str, dict[str, float | int]]:
         "0.7-0.8": [],
         "0.8+": [],
     }
-    rows = (
-        db.query(Prediction.confidence, Outcome.filtered_label)
-        .join(Outcome, Outcome.prediction_id == Prediction.id)
-        .filter(Outcome.filtered_label.isnot(None))
-        .all()
-    )
+    rows = _confidence_label_rows(db)
 
     for confidence, label in rows:
         buckets[_confidence_bucket(float(confidence))].append(int(label))
@@ -114,10 +109,15 @@ def _labeled_training_rows(
     limit: int,
     chronological: bool,
 ) -> list[dict[str, Any]]:
-    n_multi = db.query(MultiHorizonOutcome).filter(MultiHorizonOutcome.label.isnot(None)).count()
-    if n_multi > 0:
-        return _multi_horizon_rows(db, limit=limit, chronological=chronological)
-    return _single_horizon_rows(db, limit=limit, chronological=chronological)
+    rows = [
+        *_multi_horizon_rows(db, limit=limit, chronological=chronological),
+        *_single_horizon_rows(db, limit=limit, chronological=chronological),
+    ]
+    if chronological:
+        rows.sort(key=lambda row: row["timestamp"])
+    else:
+        rows.sort(key=lambda row: row["computed_at"], reverse=True)
+    return rows[:limit]
 
 
 def _single_horizon_rows(
@@ -126,27 +126,36 @@ def _single_horizon_rows(
     limit: int,
     chronological: bool,
 ) -> list[dict[str, Any]]:
+    multi_prediction_ids = _multi_labeled_prediction_ids(db)
     order_column = Prediction.timestamp.asc() if chronological else Outcome.computed_at.desc()
     rows = (
         db.query(FeatureSnapshot, Outcome)
         .join(Prediction, Prediction.id == FeatureSnapshot.prediction_id)
         .join(Outcome, Outcome.prediction_id == Prediction.id)
-        .filter(Outcome.filtered_label.isnot(None))
+        .filter(
+            Outcome.filtered_label.isnot(None),
+            ~Prediction.id.in_(multi_prediction_ids),
+        )
         .order_by(order_column)
         .limit(limit)
         .all()
     )
     dataset: list[dict[str, Any]] = []
     for snapshot, outcome in rows:
+        derived = {
+            **snapshot.derived_features,
+            "horizon_days": _horizon_days_from_label(snapshot.prediction.horizon),
+        }
         flattened = flatten_feature_snapshot(
             snapshot.event_features,
             snapshot.market_features,
-            snapshot.derived_features,
+            derived,
         )
         dataset.append({
             "features": flattened,
             "label": int(outcome.filtered_label),
             "timestamp": snapshot.prediction.timestamp,
+            "computed_at": outcome.computed_at,
         })
     return dataset
 
@@ -181,8 +190,59 @@ def _multi_horizon_rows(
             "features": flattened,
             "label": int(outcome.label),
             "timestamp": snapshot.prediction.timestamp,
+            "computed_at": outcome.computed_at,
         })
     return dataset
+
+
+def _confidence_label_rows(db: Session) -> list[tuple[float, int]]:
+    multi_rows = [
+        (float(confidence), int(label))
+        for confidence, label in (
+            db.query(Prediction.confidence, MultiHorizonOutcome.label)
+            .join(MultiHorizonOutcome, MultiHorizonOutcome.prediction_id == Prediction.id)
+            .filter(MultiHorizonOutcome.label.isnot(None))
+            .all()
+        )
+    ]
+    multi_prediction_ids = _multi_labeled_prediction_ids(db)
+    single_rows = [
+        (float(confidence), int(label))
+        for confidence, label in (
+            db.query(Prediction.confidence, Outcome.filtered_label)
+            .join(Outcome, Outcome.prediction_id == Prediction.id)
+            .filter(
+                Outcome.filtered_label.isnot(None),
+                ~Prediction.id.in_(multi_prediction_ids),
+            )
+            .all()
+        )
+    ]
+    return [*multi_rows, *single_rows]
+
+
+def _multi_labeled_prediction_ids(db: Session) -> list[Any]:
+    return [
+        prediction_id
+        for (prediction_id,) in (
+            db.query(MultiHorizonOutcome.prediction_id)
+            .filter(MultiHorizonOutcome.label.isnot(None))
+            .distinct()
+            .all()
+        )
+    ]
+
+
+def _horizon_days_from_label(value: str | None) -> int:
+    if not value:
+        return 1
+    normalized = value.strip().lower()
+    if normalized.endswith("d"):
+        normalized = normalized[:-1]
+    try:
+        return max(1, int(normalized))
+    except ValueError:
+        return 1
 
 
 def _dataset_payload(rows: list[dict[str, Any]]) -> dict[str, Any]:

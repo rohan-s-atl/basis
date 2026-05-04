@@ -1,0 +1,6 @@
+timestamp,title,description,event_type,impact_direction,severity,confidence,affected_sectors,mapped_assets
+2022-06-10T08:30:00-04:00,May CPI runs hotter than expected,Inflation surprise pressured rate-sensitive assets and broad equity risk.,inflation,negative,high,0.85,broad_market;technology;rates,SPY;QQQ;TLT
+2022-07-27T14:00:00-04:00,Federal Reserve raises rates again,The Fed delivered another large rate hike as it fought persistent inflation.,interest_rate_change,negative,high,0.8,broad_market;technology;rates,SPY;QQQ;TLT
+2023-03-10T09:30:00-05:00,Banking stress hits regional lenders,Stress around bank balance sheets weighed on financials and risk sentiment.,general_market,negative,critical,0.9,financials;broad_market,XLF;SPY
+2023-11-14T08:30:00-05:00,CPI cools more than expected,Soft inflation data supported hopes for easier financial conditions.,inflation,positive,high,0.82,broad_market;technology;rates,SPY;QQQ;TLT
+2024-04-12T09:30:00-04:00,Oil supply risk rises,Energy prices climbed as supply disruption risk increased.,supply_shock,positive,medium,0.72,energy;commodities,XLE;USO

@@ -25,6 +25,7 @@ class Settings:
     )
     openai_api_key: str | None = os.getenv("OPENAI_API_KEY")
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    fred_api_key: str | None = os.getenv("FRED_API_KEY")
     news_cache_ttl_seconds: int = int(os.getenv("NEWS_CACHE_TTL_SECONDS", "900"))
     price_cache_ttl_seconds: int = int(os.getenv("PRICE_CACHE_TTL_SECONDS", "60"))
     classification_cache_ttl_seconds: int = int(

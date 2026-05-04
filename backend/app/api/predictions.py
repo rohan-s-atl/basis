@@ -9,5 +9,15 @@ router = APIRouter(prefix="/predictions", tags=["predictions"])
 
 
 @router.get("", response_model=PredictionSummary)
-def read_predictions(db: Session = Depends(get_db), limit: int = 50) -> dict:
-    return generate_predictions(db, limit=limit)
+def read_predictions(
+    db: Session = Depends(get_db),
+    limit: int = 50,
+    min_quality: float = 0.62,
+    include_weak: bool = False,
+) -> dict:
+    return generate_predictions(
+        db,
+        limit=limit,
+        min_quality=min_quality,
+        include_weak=include_weak,
+    )

@@ -24,8 +24,19 @@ _EVENT_MULTIPLIER = {
 }
 
 
-def generate_predictions(db: Session, limit: int = 50) -> dict:
+MIN_SIGNAL_QUALITY = 0.62
+
+
+def generate_predictions(
+    db: Session,
+    limit: int = 50,
+    *,
+    min_quality: float = MIN_SIGNAL_QUALITY,
+    include_weak: bool = False,
+) -> dict:
     predictions = []
+    weak_filtered = 0
+    total_considered = 0
 
     for event in list_recent_events(db, limit=limit):
         sectors = _parse_json_list(event.affected_sectors)
@@ -36,6 +47,7 @@ def generate_predictions(db: Session, limit: int = 50) -> dict:
             price = _safe_float(asset.get("price")) or event.price_at_event
             if not symbol or not price:
                 continue
+            total_considered += 1
 
             features = build_feature_vector(
                 event,
@@ -47,6 +59,21 @@ def generate_predictions(db: Session, limit: int = 50) -> dict:
             )
             probability = score_signal_quality(features)
             move_mid = _expected_move(event, float(features["asset_specificity"]))
+            ranking_score = _ranking_score(
+                probability=probability,
+                confidence=event.confidence,
+                expected_move=move_mid,
+                severity=event.severity,
+            )
+            filter_reason = _filter_reason(
+                probability=probability,
+                confidence=event.confidence,
+                expected_move=move_mid,
+                min_quality=min_quality,
+            )
+            if filter_reason and not include_weak:
+                weak_filtered += 1
+                continue
             direction_multiplier = -1 if event.impact_direction == "negative" else 1
             if event.impact_direction == "neutral":
                 direction_multiplier = 0
@@ -61,6 +88,9 @@ def generate_predictions(db: Session, limit: int = 50) -> dict:
                     "severity": event.severity,
                     "confidence": event.confidence,
                     "probability": probability,
+                    "ranking_score": ranking_score,
+                    "is_actionable": filter_reason is None,
+                    "filter_reason": filter_reason,
                     "horizon": _horizon(event),
                     "expected_move_pct": round(move_mid * direction_multiplier, 2),
                     "expected_move_low_pct": round(max(0.1, move_mid * 0.55) * direction_multiplier, 2),
@@ -69,15 +99,21 @@ def generate_predictions(db: Session, limit: int = 50) -> dict:
                     "base_case": _scenario_text(event, symbol, "base"),
                     "bear_case": _scenario_text(event, symbol, "bear"),
                     "drivers": _drivers(event, sectors, probability),
-                    "model_version": "interpretable-v1",
+                    "model_version": "interpretable-v2",
                 }
             )
 
-    predictions.sort(key=lambda item: (item["probability"], abs(item["expected_move_pct"])), reverse=True)
+    predictions.sort(
+        key=lambda item: (item["is_actionable"], item["ranking_score"], abs(item["expected_move_pct"])),
+        reverse=True,
+    )
 
     return {
-        "model_version": "interpretable-v1",
+        "model_version": "interpretable-v2",
         "count": len(predictions),
+        "total_considered": total_considered,
+        "weak_filtered": weak_filtered,
+        "min_quality": min_quality,
         "predictions": predictions[:25],
     }
 
@@ -88,6 +124,39 @@ def _expected_move(event: EventRecord, asset_specificity: float) -> float:
     confidence_multiplier = 0.55 + event.confidence
     specificity_multiplier = 0.75 + asset_specificity
     return base * event_multiplier * confidence_multiplier * specificity_multiplier
+
+
+def _ranking_score(
+    *,
+    probability: float,
+    confidence: float,
+    expected_move: float,
+    severity: str,
+) -> float:
+    severity_score = {
+        "low": 0.25,
+        "medium": 0.5,
+        "high": 0.8,
+        "critical": 1.0,
+    }.get(severity, 0.25)
+    move_score = min(abs(expected_move) / 3.0, 1.0)
+    return round((probability * 0.45) + (confidence * 0.25) + (move_score * 0.2) + (severity_score * 0.1), 4)
+
+
+def _filter_reason(
+    *,
+    probability: float,
+    confidence: float,
+    expected_move: float,
+    min_quality: float,
+) -> str | None:
+    if probability < min_quality:
+        return "low_quality"
+    if confidence < 0.55:
+        return "low_confidence"
+    if abs(expected_move) < 0.25:
+        return "small_expected_move"
+    return None
 
 
 def _horizon(event: EventRecord) -> str:

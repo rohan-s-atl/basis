@@ -1,4 +1,4 @@
-import type { BacktestSummary, EventRecord, MarketHistory, MarketRegime, ModelHealth, PredictionSummary, PriceQuote, SignalAccuracy, TrainingRun, WatchlistImpact } from "../types";
+import type { BacktestSummary, EventRecord, MarketHistory, MarketRegime, ModelEvaluation, ModelHealth, PredictionSummary, PriceQuote, SignalAccuracy, TrainingRun, WatchlistImpact } from "../types";
 
 const configuredApiUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
 
@@ -101,6 +101,11 @@ export async function fetchPredictions(limit = 50): Promise<PredictionSummary> {
 
 export async function fetchModelHealth(): Promise<ModelHealth> {
   const { payload } = await requestJson<ModelHealth>("/model-health");
+  return payload;
+}
+
+export async function fetchModelEvaluation(): Promise<ModelEvaluation> {
+  const { payload } = await requestJson<ModelEvaluation>("/model-evaluation");
   return payload;
 }
 

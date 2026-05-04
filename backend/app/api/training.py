@@ -1,6 +1,6 @@
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -14,6 +14,7 @@ from app.services.training_data_service import (
     get_train_test_split,
     validate_dataset,
 )
+from app.services.model_evaluation_service import get_model_evaluation
 from app.services.training_run_service import (
     get_model_health,
     get_training_history,
@@ -97,18 +98,25 @@ def read_model_health(db: Session = Depends(get_db)) -> dict[str, Any]:
     return get_model_health(db)
 
 
+@router.get("/model-evaluation")
+def read_model_evaluation(
+    limit: int = 50_000,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    return get_model_evaluation(db, limit=min(limit, 50_000))
+
+
 @router.post("/train-model")
 def train_model(
-    request: Request,
     limit: int = 10_000,
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     from ml.model_store import invalidate_cache
     from ml.train_model import result_to_dict, train_xgboost_model
 
-    export_url = str(request.url_for("export_training_data"))
     bounded_limit = min(limit, 50_000)
-    result = train_xgboost_model(api_url=f"{export_url}?limit={bounded_limit}")
+    dataset = export_training_dataset(db, limit=bounded_limit)
+    result = train_xgboost_model(dataset=dataset)
     invalidate_cache()
     payload = result_to_dict(result)
 

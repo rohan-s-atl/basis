@@ -8,6 +8,7 @@ from app.core.config import settings
 from app.db.models import FeatureSnapshot, Outcome, Prediction
 from app.db.session import SessionLocal
 from app.services.market_service import fetch_price
+from app.services.outcome_label_service import benchmark_metrics, directional_label, return_bucket
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +52,16 @@ def compute_outcomes(
                 continue
 
             actual_return = (current_price - entry_price) / entry_price
-            label = _label_prediction(
+            label = directional_label(
                 prediction.predicted_direction,
                 actual_return,
+                noise_threshold=threshold,
+            )
+            benchmark_return = _benchmark_return(snapshot)
+            benchmark = benchmark_metrics(
+                predicted_direction=prediction.predicted_direction,
+                raw_return=actual_return,
+                benchmark_return=benchmark_return,
                 noise_threshold=threshold,
             )
             if label is None:
@@ -64,6 +72,10 @@ def compute_outcomes(
                     actual_return=round(actual_return, 8),
                     raw_return=round(actual_return, 8),
                     return_magnitude=round(abs(actual_return), 8),
+                    return_bucket=return_bucket(actual_return),
+                    benchmark_return=benchmark["benchmark_return"],
+                    excess_return=benchmark["excess_return"],
+                    benchmark_label=benchmark["benchmark_label"],
                     label=label,
                     filtered_label=label,
                     threshold_used=threshold,
@@ -101,16 +113,21 @@ def _snapshot_entry_price(snapshot: FeatureSnapshot) -> float | None:
         return None
 
 
-def _label_prediction(
-    predicted_direction: str,
-    actual_return: float,
-    *,
-    noise_threshold: float,
-) -> int | None:
-    if abs(actual_return) < noise_threshold:
+def _benchmark_return(snapshot: FeatureSnapshot) -> float | None:
+    derived_features: dict[str, Any] = snapshot.derived_features or {}
+    benchmark_price = derived_features.get("benchmark_price")
+    try:
+        entry_price = float(benchmark_price)
+    except (TypeError, ValueError):
         return None
-    if predicted_direction == "up" and actual_return > 0:
-        return 1
-    if predicted_direction == "down" and actual_return < 0:
-        return 1
-    return 0
+    if entry_price <= 0:
+        return None
+
+    try:
+        current = fetch_price("SPY")
+        current_price = float(current["price"])
+    except Exception as exc:
+        logger.debug("Benchmark price fetch failed: %s", exc)
+        return None
+
+    return (current_price - entry_price) / entry_price

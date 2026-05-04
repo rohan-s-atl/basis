@@ -100,6 +100,9 @@ def compute_multi_horizon_outcomes(
                         benchmark_return=benchmark_return,
                         noise_threshold=threshold,
                     )
+                    if label is None:
+                        skipped += 1
+                        continue
 
                     session.add(
                         MultiHorizonOutcome(

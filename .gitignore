@@ -15,3 +15,4 @@ build/
 *.db-journal
 backend/storage/
 frontend/dist/
+backend/ml/models/

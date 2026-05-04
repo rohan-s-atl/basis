@@ -13,6 +13,8 @@ from app.services.market_service import fetch_price
 logger = logging.getLogger(__name__)
 
 _ACTIONABLE_RETURN_THRESHOLD_PCT = 0.05
+_INITIAL_EQUITY = 10_000.0
+_SIGNAL_ALLOCATION = 0.10
 
 
 def run_backtest(db: Session, limit: int = 100) -> dict:
@@ -83,6 +85,60 @@ def run_backtest(db: Session, limit: int = 100) -> dict:
 
 def get_backtest_summary(db: Session) -> dict:
     return build_backtest_summary(list_signal_backtests(db), skipped=0)
+
+
+def get_portfolio_simulation(db: Session) -> dict:
+    records = list_signal_backtests(db, limit=500)
+    ordered = sorted(
+        records,
+        key=lambda record: (
+            record.evaluated_at is None,
+            record.evaluated_at.isoformat() if record.evaluated_at else str(record.id),
+        ),
+    )
+
+    equity = _INITIAL_EQUITY
+    points = [{
+        "index": 0,
+        "label": "Start",
+        "equity": round(equity, 2),
+        "return_pct": 0.0,
+        "benchmark_equity": round(_INITIAL_EQUITY, 2),
+        "benchmark_return_pct": 0.0,
+    }]
+
+    for index, record in enumerate(ordered, start=1):
+        signal_return = _signal_return_pct(record)
+        equity *= 1.0 + (_SIGNAL_ALLOCATION * signal_return / 100.0)
+        points.append({
+            "index": index,
+            "label": record.evaluated_at.isoformat() if record.evaluated_at else str(index),
+            "equity": round(equity, 2),
+            "return_pct": round(((equity / _INITIAL_EQUITY) - 1.0) * 100.0, 3),
+            "benchmark_equity": round(_INITIAL_EQUITY, 2),
+            "benchmark_return_pct": 0.0,
+        })
+
+    benchmark_points = _benchmark_curve(len(points))
+    for point, benchmark in zip(points, benchmark_points):
+        point["benchmark_equity"] = benchmark["equity"]
+        point["benchmark_return_pct"] = benchmark["return_pct"]
+
+    final_return = points[-1]["return_pct"] if points else 0.0
+    benchmark_return = points[-1]["benchmark_return_pct"] if points else 0.0
+    wins = sum(1 for record in ordered if _signal_return_pct(record) > 0)
+
+    return {
+        "initial_equity": round(_INITIAL_EQUITY, 2),
+        "final_equity": points[-1]["equity"] if points else round(_INITIAL_EQUITY, 2),
+        "total_return_pct": final_return,
+        "benchmark_return_pct": benchmark_return,
+        "excess_return_pct": round(final_return - benchmark_return, 3),
+        "signals": len(ordered),
+        "win_rate_pct": round((wins / len(ordered)) * 100.0, 1) if ordered else 0.0,
+        "allocation_pct": round(_SIGNAL_ALLOCATION * 100.0, 1),
+        "points": points,
+    }
 
 
 def build_backtest_summary(records: list[SignalBacktest], skipped: int = 0) -> dict:
@@ -195,6 +251,50 @@ def _outcome_status(record: SignalBacktest) -> str:
     if abs(record.return_pct) < _ACTIONABLE_RETURN_THRESHOLD_PCT:
         return "flat"
     return "correct" if record.correct else "incorrect"
+
+
+def _signal_return_pct(record: SignalBacktest) -> float:
+    if record.expected_direction == "negative":
+        return -float(record.return_pct)
+    return float(record.return_pct)
+
+
+def _benchmark_curve(length: int) -> list[dict[str, float]]:
+    if length <= 0:
+        return []
+
+    try:
+        spy = fetch_price("SPY")
+        history = [float(value) for value in spy.get("history", []) if value is not None]
+    except Exception as exc:
+        logger.warning("SPY benchmark fetch failed: %s", exc)
+        history = []
+
+    if len(history) < 2:
+        return [
+            {"equity": round(_INITIAL_EQUITY, 2), "return_pct": 0.0}
+            for _ in range(length)
+        ]
+
+    sampled: list[float] = []
+    for index in range(length):
+        history_index = round(index * (len(history) - 1) / max(length - 1, 1))
+        sampled.append(history[history_index])
+
+    start = sampled[0]
+    if start <= 0:
+        return [
+            {"equity": round(_INITIAL_EQUITY, 2), "return_pct": 0.0}
+            for _ in range(length)
+        ]
+
+    return [
+        {
+            "equity": round(_INITIAL_EQUITY * (price / start), 2),
+            "return_pct": round(((price / start) - 1.0) * 100.0, 3),
+        }
+        for price in sampled
+    ]
 
 
 def _group_accuracy_pct(items: list[SignalBacktest]) -> float:

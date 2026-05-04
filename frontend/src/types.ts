@@ -168,6 +168,32 @@ export type BacktestSummary = {
   recent: BacktestSignal[];
 };
 
+export type PortfolioSimulationPoint = {
+  index: number;
+  label: string;
+  equity: number;
+  return_pct: number;
+  benchmark_equity: number;
+  benchmark_return_pct: number;
+};
+
+export type PortfolioSimulation = {
+  initial_equity: number;
+  final_equity: number;
+  total_return_pct: number;
+  benchmark_return_pct: number;
+  excess_return_pct: number;
+  signals: number;
+  win_rate_pct: number;
+  allocation_pct: number;
+  points: PortfolioSimulationPoint[];
+};
+
+export type ShapContribution = {
+  feature: string;
+  shap_value: number;
+};
+
 export type AssetPrediction = {
   symbol: string;
   title: string;
@@ -189,6 +215,7 @@ export type AssetPrediction = {
   bear_case: string;
   drivers: string[];
   model_version: string;
+  shap_contributions: ShapContribution[];
 };
 
 export type PredictionSummary = {
@@ -233,11 +260,32 @@ export type TrainingRun = {
   label_balance: LabelBalance;
 };
 
+export type TrainingDataStats = {
+  num_samples: number;
+  class_distribution: LabelBalance;
+  feature_count: number;
+};
+
+export type TrainingDataValidation = {
+  num_samples: number;
+  class_balance: LabelBalance;
+  num_features: number;
+  issues: string[];
+};
+
 export type ModelHealth = {
   status: "healthy" | "drift_detected" | "no_model";
   rolling_accuracy: { accuracy: number; samples: number; window: number } | null;
   peak_accuracy: number | null;
   drift_detected: boolean;
+  confidence_drift: {
+    drift_detected: boolean;
+    psi: number;
+    threshold: number;
+    training: number[];
+    recent: number[];
+    samples: number;
+  };
   last_trained_at: string | null;
   dataset_size_at_training: number | null;
   retraining_threshold: number;

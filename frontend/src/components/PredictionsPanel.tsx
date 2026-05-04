@@ -129,12 +129,44 @@ export function PredictionsPanel() {
                     ))}
                   </div>
                 </div>
+
+                {(selected.shap_contributions?.length ?? 0) > 0 && (
+                  <div className="mt-3 rounded-lg border border-quant-line bg-quant-bg/60 p-2">
+                    <p className="quant-eyebrow mb-2">SHAP contributors</p>
+                    <div className="grid gap-1.5">
+                      {selected.shap_contributions.slice(0, 6).map((item) => (
+                        <ShapBar key={item.feature} feature={item.feature} value={item.shap_value} />
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
         </div>
       )}
     </section>
+  );
+}
+
+function ShapBar({ feature, value }: { feature: string; value: number }) {
+  const width = `${Math.min(100, Math.abs(value) * 100)}%`;
+  const positive = value >= 0;
+  return (
+    <div>
+      <div className="mb-0.5 flex items-center justify-between gap-2 text-[0.65rem]">
+        <span className="truncate font-bold text-quant-text">{formatLabel(feature.replace(/^(event_|market_|derived_)/, ""))}</span>
+        <span className={`shrink-0 font-black ${positive ? "text-quant-green" : "text-quant-red"}`}>
+          {positive ? "+" : ""}{value.toFixed(3)}
+        </span>
+      </div>
+      <div className="h-1.5 rounded-full bg-quant-bg">
+        <div
+          className={`h-full rounded-full ${positive ? "bg-quant-green" : "bg-quant-red"}`}
+          style={{ width }}
+        />
+      </div>
+    </div>
   );
 }
 

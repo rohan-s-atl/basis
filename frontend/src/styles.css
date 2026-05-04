@@ -17,13 +17,23 @@
 
   body {
     margin: 0;
-    min-width: 900px;
+    min-width: 320px;
     background: #0b0f14;
   }
 
   button,
   input {
     font: inherit;
+  }
+
+  button {
+    outline: none;
+  }
+
+  button:focus-visible,
+  input:focus-visible,
+  select:focus-visible {
+    box-shadow: 0 0 0 2px rgba(0, 230, 118, 0.32);
   }
 }
 
@@ -45,7 +55,7 @@
   }
 
   .quant-button {
-    @apply inline-flex h-9 items-center justify-center gap-2 rounded-md border border-quant-line bg-quant-blue/15 px-3 text-sm font-semibold text-quant-text transition hover:border-quant-blue/70 hover:bg-quant-blue/25 disabled:cursor-not-allowed disabled:opacity-60;
+    @apply inline-flex h-9 items-center justify-center gap-2 rounded-md border border-quant-line bg-quant-blue/15 px-3 text-sm font-semibold text-quant-text transition hover:border-quant-blue/70 hover:bg-quant-blue/25 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60;
   }
 
   .quant-input {

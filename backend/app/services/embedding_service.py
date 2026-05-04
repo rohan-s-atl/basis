@@ -77,7 +77,18 @@ def is_semantic_duplicate(
     new_embedding: list[float],
     candidate_embeddings: list[list[float]],
 ) -> bool:
-    return any(
-        cosine_similarity(new_embedding, existing) >= SIMILARITY_THRESHOLD
-        for existing in candidate_embeddings
-    )
+    return most_similar_duplicate_index(new_embedding, candidate_embeddings) is not None
+
+
+def most_similar_duplicate_index(
+    new_embedding: list[float],
+    candidate_embeddings: list[list[float]],
+) -> int | None:
+    best_index: int | None = None
+    best_similarity = SIMILARITY_THRESHOLD
+    for index, existing in enumerate(candidate_embeddings):
+        similarity = cosine_similarity(new_embedding, existing)
+        if similarity >= best_similarity:
+            best_similarity = similarity
+            best_index = index
+    return best_index

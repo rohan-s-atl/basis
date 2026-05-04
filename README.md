@@ -1,14 +1,14 @@
-# Macro Event Intelligence Engine
+# Basis
 
-A full-stack AI financial intelligence system that converts real-world news into structured macro events, maps them to affected assets, and runs a self-improving ML prediction pipeline with live market regime awareness.
+Basis is a full-stack AI financial intelligence system that converts real-world news into structured macro events, maps them to affected assets, and runs a self-improving ML prediction pipeline with live market regime awareness.
 
 ## What It Does
 
-Financial markets react to macro events: rate decisions, inflation data, geopolitical conflict, supply shocks, earnings, energy disruptions. This system ingests news, classifies each article into a structured financial event using an LLM, links it to relevant ETFs and assets, generates directional predictions using a trained XGBoost model, tracks outcomes across multiple time horizons, and visualizes everything in a professional trading-terminal-style dashboard.
+Financial markets react to macro events: rate decisions, inflation data, geopolitical conflict, supply shocks, earnings, energy disruptions. Basis ingests news, classifies each article into a structured financial event using an LLM, links it to relevant ETFs and assets, generates directional predictions using a trained XGBoost model, tracks outcomes across multiple time horizons, and visualizes everything in a routed market-intelligence app.
 
 ```
 News → LLM Classification → Asset Mapping → Feature Engineering → XGBoost Prediction
-     → Outcome Tracking → Model Retraining → Drift Detection → Live Dashboard
+     → Outcome Tracking → Model Retraining → Drift Detection → Basis App
 ```
 
 ---
@@ -29,7 +29,7 @@ backend/
       outcome_service.py      Single-horizon outcome computation
       multi_horizon_service.py 1d / 3d / 5d outcome labeling via yfinance
       training_data_service.py Training dataset export and validation
-      training_run_service.py  Experiment tracking and drift detection
+      training_run_service.py  Experiment tracking, accuracy drift, confidence drift
       regime_service.py       Live market regime (VIX, SPY, 10Y yield)
       historical_market_service.py  Historical price windows for seed training
       historical_seed_service.py     CSV-to-ML-table historical seeding
@@ -48,23 +48,24 @@ backend/
   ml/
     train_model.py            XGBoost training pipeline
     model_store.py            Hot-reload model cache
-    models/                   Saved model artifacts (xgboost_model.json, calibrated_model.pkl)
+    models/                   Local generated model artifacts (git-ignored)
   scripts/
     generate_macro_seed_events.py    Build historical event CSVs from BLS/FRED
     seed_historical_training_data.py Seed historical events, prices, labels
 
 frontend/
   src/
-    App.tsx                   Main cockpit layout and tab routing
+    App.tsx                   Routed app shell and page/detail views
     components/
       MLIntelligencePanel.tsx  ML health, regime, feature importance, training history
       PredictionsPanel.tsx     Forward predictions
-      BacktestPanel.tsx        Signal backtest analytics
-      AssetTable.tsx           Asset decision table with sparklines
-      EventFeed.tsx            Macro event stream
+      BacktestPanel.tsx        Signal backtest analytics and portfolio curve
       SectorHeatmap.tsx        Sector pressure heatmap
-      IntelligencePanel.tsx    Selected event detail
-      ... (11 total components)
+      MarketBreadth.tsx        Breadth metrics and watchlist impact
+      SignalAccuracy.tsx       Historical signal accuracy
+      WatchlistPanel.tsx       Watchlist impact controls
+      AlertQueue.tsx           Alert rule queue
+      ExpandModal.tsx          Expandable detail surfaces
     lib/
       api.ts                  Typed API client with fallback and timeout handling
       intelligence.ts         Frontend data helpers
@@ -101,11 +102,13 @@ The training pipeline (`ml/train_model.py`) runs on demand or triggers automatic
 
 1. **Walk-forward cross-validation** — expanding window splits that respect temporal ordering, no future data leakage
 2. **Model comparison** — XGBoost vs logistic regression (StandardScaler + LogisticRegression pipeline) on test accuracy and ROC-AUC
-3. **SHAP explainability** — TreeExplainer mean absolute SHAP values per feature on the test set
+3. **SHAP explainability** — TreeExplainer mean absolute SHAP values per feature on the test set, plus per-prediction contributors for stored ML forecasts
 4. **Platt calibration** — `CalibratedClassifierCV(cv=3)` wraps the raw XGBoost to produce better-calibrated probabilities; Brier score improvement tracked before and after
 5. **Confidence bucket analysis** — accuracy broken down by prediction confidence band (0.5–0.6, 0.6–0.7, 0.7–0.8, 0.8+)
 
-Artifacts saved: `xgboost_model.json`, `calibrated_model.pkl`, `feature_names.json`. The model store uses mtime-based hot-reload so new models are picked up without restarting the server.
+Manual and automatic retraining use the database export payload directly, so retraining does not depend on the server making HTTP calls back into itself. The CLI training path can still load a dataset from `/export-training-data`.
+
+Artifacts are written at runtime to `backend/ml/models/` as `xgboost_model.json`, `calibrated_model.pkl`, and `feature_names.json`. That directory is git-ignored because these are generated local artifacts. The model store uses mtime-based hot-reload so new models are picked up without restarting the server.
 
 API and background training export the dataset in-process instead of calling the backend through a hardcoded localhost URL. CLI training also records a `training_runs` entry when the configured database is writable.
 
@@ -139,7 +142,11 @@ Current seeded baseline after BLS + FRED generation:
 
 **Single-horizon** (`outcome_service.py`): Fetches current price vs entry price, applies direction label, filters noise below a configurable return threshold, assigns a return bucket (`flat`, `small`, `medium`, `large`), and stores benchmark-relative fields when an event-time SPY benchmark price exists.
 
-**Multi-horizon** (`multi_horizon_service.py`): Labels each prediction at 1-day, 3-day, and 5-day horizons using yfinance historical closes. Predictions are grouped by symbol to minimize API calls. A minimum-age filter (8 days) ensures exit prices exist before attempting labeling. Multi-horizon labels are preferred over single-horizon for the same prediction, while single-horizon live rows are still included when no multi-horizon label exists.
+Noise-filtered predictions stay pending instead of becoming misleading flat labels, so later runs can retry them when price movement is large enough.
+
+**Multi-horizon** (`multi_horizon_service.py`): Labels each prediction at 1-day, 3-day, and 5-day horizons using yfinance historical closes. Predictions are grouped by symbol to minimize API calls. A minimum-age filter (8 days) ensures exit prices exist before attempting labeling. Noise-filtered multi-horizon rows are skipped rather than persisted with null labels.
+
+Training export combines single-horizon and multi-horizon labeled rows in chronological order. Multi-horizon labels are preferred over single-horizon for the same prediction, while single-horizon live rows are still included when no multi-horizon label exists.
 
 ### Model Evaluation
 
@@ -175,7 +182,7 @@ The hourly outcome computation job checks whether the labeled dataset has grown 
 
 ### Drift Detection
 
-`GET /model-health` computes rolling accuracy over the last 30 labeled predictions and compares it to the peak accuracy from the training history. If the gap exceeds 10 percentage points with at least 10 samples in the window, `drift_detected: true` is returned and the dashboard surfaces an alert.
+`GET /model-health` computes rolling accuracy over the last 30 labeled predictions and compares it to the peak accuracy from the training history. It also compares recent prediction confidence against the training-time confidence distribution with Population Stability Index (PSI). If either accuracy drift or confidence-distribution drift crosses threshold, `drift_detected: true` is returned and Basis surfaces an alert.
 
 ### Semantic Deduplication
 
@@ -207,24 +214,26 @@ Three APScheduler jobs run continuously:
 
 ---
 
-## Frontend Cockpit
+## Basis App
 
 Built with React 19, TypeScript, Vite, and TailwindCSS. No UI component library — entirely custom dark quant-terminal aesthetic.
 
-**Main layout:**
-- **Left** — Event Feed (searchable macro stream) + Macro Situations (event clusters)
-- **Center** — Asset Decision Table with live prices and sparklines, Event Timeline, Sector Heatmap
-- **Right** — Intelligence Panel (event reasoning, assets, suggested actions) + Workbench
+Basis is organized as a routed intelligence app rather than one dense cockpit. Pages are shareable through hash routes and most rows/cards drill into deeper views. The left rail carries the Basis brand, live system state, a compact pulse readout, model-readiness progress, market regime, and a dynamic next-action prompt.
 
-**Workbench tabs:**
-| Tab | Content |
+| Page | Purpose |
 |---|---|
-| Breadth | Market breadth metrics, watchlist impact |
-| Alerts | Configurable alert rules with match counts |
-| Predict | Forward predictions ranked by edge score; weak signals are filtered by default |
-| Backtest | Signal outcome analytics by event type, symbol, severity |
-| Accuracy | Historical signal accuracy by event type |
-| **ML** | Model health, model-vs-baseline evaluation, high-confidence performance, data quality, market regime, feature importance, training history, Retrain button |
+| Overview | Executive summary, macro risks, latest high-impact events, compact portfolio/model/data status |
+| Events | Searchable event feed with sector, asset, severity, direction, and recency context |
+| Event Detail | Article/source detail, LLM classification, reasoning, affected assets, related predictions |
+| Assets | Asset impact table with linked event count, price context, and prediction direction |
+| Asset Detail | Price chart, linked events, signal history, accuracy, exposure, latest model drivers |
+| Predictions | Ranked forecasts with edge score, weak-signal filtering, confidence, expected move, horizon, event source, and model version |
+| Prediction Detail | Forecast case file with SHAP contributors, feature snapshot, regime, outcome status, similar signals |
+| Portfolio | Signal-following equity curve vs SPY, win rate, drawdown, ranked signals, event-type breakdowns |
+| ML Lab | Model health, drift, confidence PSI, model-vs-baseline evaluation, high-confidence performance, feature importance, training history, validation, retrain controls |
+| Data Health | Pipeline readiness, sample counts, class balance, labeling state, validation issues, API status |
+
+Clickable surfaces include event cards, article titles, asset symbols, prediction rows, SHAP bars, training runs, market regime status, portfolio chart points, heatmap sectors, and backtest/signal rows.
 
 ---
 
@@ -242,6 +251,7 @@ POST /watchlist/impact                Portfolio/watchlist impact analysis
 GET  /signals/accuracy                Historical signal accuracy by event type
 POST /backtest/run                    Run signal backtest
 GET  /backtest/summary                Backtest analytics and top signals
+GET  /backtest/portfolio              Simulated signal portfolio curve vs SPY
 GET  /predictions                     Forward-looking asset predictions with weak-signal filtering
 POST /compute-outcomes                Label outcomes for unlabeled predictions
 POST /compute-multi-horizon-outcomes  Label 1d/3d/5d outcomes
@@ -268,7 +278,8 @@ python -m venv .venv
 .venv\Scripts\activate       # Windows
 # source .venv/bin/activate  # macOS/Linux
 pip install -r requirements.txt
-copy .env.example .env       # fill in API keys
+cp .env.example .env         # macOS/Linux
+# copy .env.example .env     # Windows
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
@@ -282,7 +293,7 @@ npm install
 npm run dev
 ```
 
-Dashboard: `http://127.0.0.1:5173`
+Basis app: `http://127.0.0.1:5173`
 
 ### Train the Model
 
@@ -296,7 +307,7 @@ curl -X POST http://127.0.0.1:8000/compute-outcomes
 curl -X POST http://127.0.0.1:8000/train-model
 ```
 
-Or use the **Retrain** button in the ML tab of the dashboard.
+Or use the **Retrain** button in the ML Lab page of Basis.
 
 ### Seed Historical Training Data
 
@@ -372,11 +383,20 @@ VITE_API_BASE_URL=http://127.0.0.1:8000
 - **Time-series ML discipline** — walk-forward CV, no data leakage, chronological splits
 - **Multi-horizon labeling** — outcome labels at 1d, 3d, 5d horizons from historical market data
 - **Autonomous ML lifecycle** — experiment tracking, auto-retraining triggers, drift detection
+- **Portfolio simulation** — signal-following equity curve compared with a normalized SPY benchmark
 - **LLM integration** — structured extraction via OpenAI + semantic deduplication via embeddings
 - **Market regime awareness** — live VIX/SPY/yield encoding injected as ML features
 - **FastAPI service architecture** — modular routers, dependency injection, typed schemas
-- **React dashboard** — professional dark terminal UI with live data, sparklines, and interactivity
+- **React app** — professional dark terminal UI with routed pages, live data, sparklines, and interactivity
 - **Background job scheduling** — APScheduler for continuous ingestion, labeling, and model health checks
+
+## Current Boundaries
+
+- Model metrics are only as credible as the labeled dataset. The recommended target is 300+ non-noise labeled samples with `OUTCOME_NOISE_THRESHOLD=0.0001`.
+- Multi-horizon labels require predictions old enough for the 1d/3d/5d exits to exist.
+- Runtime model artifacts are generated locally under `backend/ml/models/` and are intentionally ignored by git.
+- Basis uses request/refresh polling, not WebSockets.
+- The heatmap is a macro/sector pressure view, not a signal-correlation matrix.
 
 ---
 

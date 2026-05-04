@@ -114,7 +114,37 @@ export function MLIntelligencePanel() {
                 </p>
               </div>
             )}
+            {health.confidence_drift && (
+              <div>
+                <p className="text-quant-muted">Confidence PSI</p>
+                <p className={`mt-0.5 font-black ${health.confidence_drift.drift_detected ? "text-quant-red" : "text-quant-text"}`}>
+                  {health.confidence_drift.psi.toFixed(3)}
+                  <span className="ml-1 text-[0.65rem] font-semibold text-quant-muted">
+                    ({health.confidence_drift.samples} preds)
+                  </span>
+                </p>
+              </div>
+            )}
           </div>
+
+          {health.confidence_drift && health.confidence_drift.samples > 0 && (
+            <div className="mt-2">
+              <div className="mb-1 flex items-center justify-between text-[0.62rem] font-bold uppercase text-quant-muted">
+                <span>Training confidence</span>
+                <span>Recent</span>
+              </div>
+              <div className="grid grid-cols-4 gap-1">
+                {health.confidence_drift.recent.map((share, index) => (
+                  <div key={index} className="h-1.5 rounded-full bg-quant-bg">
+                    <div
+                      className={`h-full rounded-full ${health.confidence_drift.drift_detected ? "bg-quant-red" : "bg-quant-green"}`}
+                      style={{ width: `${Math.max(4, share * 100)}%` }}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {health.last_trained_at && (
             <p className="mt-2 text-[0.65rem] text-quant-muted">
@@ -238,8 +268,14 @@ export function MLIntelligencePanel() {
           </div>
           {history.length >= 2 && <AccuracySparkline runs={history} />}
           <div className="mt-2 grid gap-1">
-            {history.slice(0, 4).map((run) => (
-              <div key={run.id} className="flex items-center justify-between gap-1 text-[0.65rem]">
+            {history.slice(0, 4).map((run, index) => (
+              <button
+                type="button"
+                key={run.id}
+                onClick={() => { window.location.hash = `/training/${index}`; }}
+                className="flex items-center justify-between gap-1 rounded-md px-1 py-1 text-left text-[0.65rem] transition hover:bg-quant-green/5"
+                title="Open training run detail"
+              >
                 <span className="shrink-0 text-quant-muted">
                   {new Date(run.trained_at).toLocaleString([], {
                     month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"
@@ -255,7 +291,7 @@ export function MLIntelligencePanel() {
                   AUC {run.roc_auc !== null ? run.roc_auc.toFixed(3) : "—"}
                 </span>
                 <span className="shrink-0 text-quant-muted">{run.dataset_size}s</span>
-              </div>
+              </button>
             ))}
           </div>
         </div>

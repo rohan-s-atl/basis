@@ -7,7 +7,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.db.models import EventRecord
 from app.db.session import Base
-from app.services.backtest_service import run_backtest
+from app.services.backtest_service import get_portfolio_simulation, run_backtest
 
 
 def test_run_backtest_builds_signal_outcome(monkeypatch) -> None:
@@ -46,6 +46,7 @@ def test_run_backtest_builds_signal_outcome(monkeypatch) -> None:
 
     try:
         summary = run_backtest(db_session)
+        portfolio = get_portfolio_simulation(db_session)
     finally:
         db_session.close()
 
@@ -55,3 +56,6 @@ def test_run_backtest_builds_signal_outcome(monkeypatch) -> None:
     assert summary["top_signals"][0]["symbol"] == "XLE"
     assert summary["top_signals"][0]["return_pct"] == 4.0
     assert summary["top_signals"][0]["ml_score"] > 0.5
+    assert portfolio["signals"] == 1
+    assert portfolio["total_return_pct"] > 0
+    assert len(portfolio["points"]) == 2

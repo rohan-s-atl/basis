@@ -112,11 +112,10 @@ def train_model(
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     from ml.model_store import invalidate_cache
-    from ml.train_model import result_to_dict, train_xgboost_model
+    from ml.train_model import result_to_dict, train_xgboost_from_payload
 
     bounded_limit = min(limit, 50_000)
-    dataset = export_training_dataset(db, limit=bounded_limit)
-    result = train_xgboost_model(dataset=dataset)
+    result = train_xgboost_from_payload(export_training_dataset(db, limit=bounded_limit))
     invalidate_cache()
     payload = result_to_dict(result)
 

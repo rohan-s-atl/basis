@@ -2,9 +2,10 @@ import json
 
 from sqlalchemy.orm import Session
 
-from app.db.models import EventRecord
+from app.db.models import EventRecord, FeatureSnapshot, Prediction
 from app.repositories.event_repository import list_recent_events
 from app.services.feature_service import build_feature_vector, score_signal_quality
+from app.services.ml_scorer import explain_prediction
 
 _SEVERITY_MOVE = {
     "low": 0.35,
@@ -34,6 +35,21 @@ def generate_predictions(
     min_quality: float = MIN_SIGNAL_QUALITY,
     include_weak: bool = False,
 ) -> dict:
+    stored = _stored_ml_predictions(db, limit=limit)
+    if stored:
+        filtered = [
+            item
+            for item in stored
+            if include_weak or item["is_actionable"]
+        ]
+        return {
+            "model_version": _summary_model_version(filtered or stored),
+            "count": len(filtered),
+            "total_considered": len(stored),
+            "weak_filtered": len(stored) - len(filtered),
+            "min_quality": min_quality,
+            "predictions": filtered[:25],
+        }
     predictions = []
     weak_filtered = 0
     total_considered = 0
@@ -100,6 +116,7 @@ def generate_predictions(
                     "bear_case": _scenario_text(event, symbol, "bear"),
                     "drivers": _drivers(event, sectors, probability),
                     "model_version": "interpretable-v2",
+                    "shap_contributions": [],
                 }
             )
 
@@ -116,6 +133,107 @@ def generate_predictions(
         "min_quality": min_quality,
         "predictions": predictions[:25],
     }
+
+
+def _stored_ml_predictions(db: Session, limit: int) -> list[dict]:
+    rows = (
+        db.query(Prediction, FeatureSnapshot)
+        .join(FeatureSnapshot, FeatureSnapshot.prediction_id == Prediction.id)
+        .order_by(Prediction.timestamp.desc())
+        .limit(limit)
+        .all()
+    )
+    predictions: list[dict] = []
+    for prediction, snapshot in rows:
+        event = prediction.event
+        raw_text = event.raw_text if event is not None else ""
+        title = raw_text.splitlines()[0] if raw_text else f"{prediction.asset} prediction"
+        direction = "positive" if prediction.predicted_direction == "up" else "negative"
+        confidence = float(prediction.confidence)
+        volatility = float((snapshot.market_features or {}).get("rolling_volatility", 0.0))
+        expected_move = max(0.1, min(3.5, volatility * 200.0 or confidence * 1.2))
+        signed_move = expected_move if direction == "positive" else -expected_move
+        model_version = str((snapshot.derived_features or {}).get("prediction_model_version", "xgboost-v1"))
+        ranking_score = _ranking_score(
+            probability=confidence,
+            confidence=confidence,
+            expected_move=expected_move,
+            severity=_severity_label(float(event.severity) if event is not None else 0.0),
+        )
+        filter_reason = _filter_reason(
+            probability=confidence,
+            confidence=confidence,
+            expected_move=expected_move,
+            min_quality=MIN_SIGNAL_QUALITY,
+        )
+        shap = explain_prediction(
+            snapshot.event_features,
+            snapshot.market_features,
+            snapshot.derived_features,
+        )
+
+        predictions.append({
+            "symbol": prediction.asset,
+            "title": title,
+            "event_type": event.event_type if event is not None else "general_market",
+            "affected_sectors": [],
+            "impact_direction": direction,
+            "severity": _severity_label(float(event.severity) if event is not None else 0.0),
+            "confidence": confidence,
+            "probability": confidence,
+            "ranking_score": ranking_score,
+            "is_actionable": filter_reason is None,
+            "filter_reason": filter_reason,
+            "horizon": prediction.horizon,
+            "expected_move_pct": round(signed_move, 2),
+            "expected_move_low_pct": round(signed_move * 0.55, 2),
+            "expected_move_high_pct": round(signed_move * 1.55, 2),
+            "bull_case": _stored_scenario(prediction.asset, direction, "bull"),
+            "base_case": f"{prediction.asset} follows the stored {prediction.horizon} ML signal.",
+            "bear_case": _stored_scenario(prediction.asset, direction, "bear"),
+            "drivers": _stored_drivers(model_version, confidence, shap),
+            "model_version": model_version,
+            "shap_contributions": shap,
+        })
+
+    predictions.sort(key=lambda item: (item["probability"], abs(item["expected_move_pct"])), reverse=True)
+    return predictions
+
+
+def _summary_model_version(predictions: list[dict]) -> str:
+    versions = [str(item.get("model_version", "")) for item in predictions if item.get("model_version")]
+    if not versions:
+        return "unknown"
+    return versions[0]
+
+
+def _severity_label(value: float) -> str:
+    if value >= 0.9:
+        return "critical"
+    if value >= 0.7:
+        return "high"
+    if value >= 0.4:
+        return "medium"
+    return "low"
+
+
+def _stored_scenario(symbol: str, direction: str, scenario: str) -> str:
+    if scenario == "bull":
+        if direction == "negative":
+            return f"{symbol} benefits if the downside signal mean-reverts or macro pressure fades."
+        return f"{symbol} extends higher if the model drivers persist and market regime stays supportive."
+    if direction == "positive":
+        return f"{symbol} weakens if the signal is already priced in or regime conditions deteriorate."
+    return f"{symbol} falls further if model drivers intensify and risk appetite weakens."
+
+
+def _stored_drivers(model_version: str, confidence: float, shap: list[dict]) -> list[str]:
+    drivers = [
+        f"{round(confidence * 100)}% stored model confidence",
+        f"model version: {model_version}",
+    ]
+    drivers.extend(str(item["feature"]).replace("_", " ") for item in shap[:3])
+    return drivers
 
 
 def _expected_move(event: EventRecord, asset_specificity: float) -> float:

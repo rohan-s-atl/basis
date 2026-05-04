@@ -58,15 +58,15 @@ def explain_prediction(
     """Return top SHAP contributors for a single prediction. Returns [] if model unavailable."""
     from ml.model_store import get_feature_names, get_model
 
-    import numpy as np
-    import shap
-
     raw = get_model()
     feature_names = get_feature_names()
     if raw is None or feature_names is None:
         return []
 
     try:
+        import numpy as np
+        import shap
+
         features = flatten_feature_snapshot(event_features, market_features, derived_features)
         X_row = [[float(features.get(f, 0.0)) for f in feature_names]]
 

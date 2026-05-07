@@ -26,6 +26,9 @@ _EVENT_MULTIPLIER = {
 
 
 MIN_SIGNAL_QUALITY = 0.62
+GATED_ASSETS = {"GLD", "XLF"}
+GATED_EVENT_TYPES = {"interest_rate_change"}
+GATED_HORIZON_DAYS = {3}
 
 
 def generate_predictions(
@@ -35,7 +38,7 @@ def generate_predictions(
     min_quality: float = MIN_SIGNAL_QUALITY,
     include_weak: bool = False,
 ) -> dict:
-    stored = _stored_ml_predictions(db, limit=limit)
+    stored = _stored_ml_predictions(db, limit=limit, min_quality=min_quality)
     if stored:
         filtered = [
             item
@@ -81,7 +84,11 @@ def generate_predictions(
                 expected_move=move_mid,
                 severity=event.severity,
             )
+            horizon = _horizon(event)
             filter_reason = _filter_reason(
+                symbol=symbol,
+                event_type=event.event_type,
+                horizon=horizon,
                 probability=probability,
                 confidence=event.confidence,
                 expected_move=move_mid,
@@ -107,7 +114,7 @@ def generate_predictions(
                     "ranking_score": ranking_score,
                     "is_actionable": filter_reason is None,
                     "filter_reason": filter_reason,
-                    "horizon": _horizon(event),
+                    "horizon": horizon,
                     "expected_move_pct": round(move_mid * direction_multiplier, 2),
                     "expected_move_low_pct": round(max(0.1, move_mid * 0.55) * direction_multiplier, 2),
                     "expected_move_high_pct": round(move_mid * 1.55 * direction_multiplier, 2),
@@ -135,7 +142,7 @@ def generate_predictions(
     }
 
 
-def _stored_ml_predictions(db: Session, limit: int) -> list[dict]:
+def _stored_ml_predictions(db: Session, limit: int, min_quality: float) -> list[dict]:
     rows = (
         db.query(Prediction, FeatureSnapshot)
         .join(FeatureSnapshot, FeatureSnapshot.prediction_id == Prediction.id)
@@ -161,10 +168,13 @@ def _stored_ml_predictions(db: Session, limit: int) -> list[dict]:
             severity=_severity_label(float(event.severity) if event is not None else 0.0),
         )
         filter_reason = _filter_reason(
+            symbol=prediction.asset,
+            event_type=event.event_type if event is not None else "general_market",
+            horizon=prediction.horizon,
             probability=confidence,
             confidence=confidence,
             expected_move=expected_move,
-            min_quality=MIN_SIGNAL_QUALITY,
+            min_quality=min_quality,
         )
         shap = explain_prediction(
             snapshot.event_features,
@@ -263,11 +273,21 @@ def _ranking_score(
 
 def _filter_reason(
     *,
+    symbol: str,
+    event_type: str,
+    horizon: str,
     probability: float,
     confidence: float,
     expected_move: float,
     min_quality: float,
 ) -> str | None:
+    segment_reason = _segment_filter_reason(
+        symbol=symbol,
+        event_type=event_type,
+        horizon=horizon,
+    )
+    if segment_reason is not None:
+        return segment_reason
     if probability < min_quality:
         return "low_quality"
     if confidence < 0.55:
@@ -275,6 +295,32 @@ def _filter_reason(
     if abs(expected_move) < 0.25:
         return "small_expected_move"
     return None
+
+
+def _segment_filter_reason(
+    *,
+    symbol: str,
+    event_type: str,
+    horizon: str,
+) -> str | None:
+    if symbol.upper() in GATED_ASSETS:
+        return "gated_asset"
+    if event_type in GATED_EVENT_TYPES:
+        return "gated_event_type"
+    if _horizon_days(horizon) in GATED_HORIZON_DAYS:
+        return "gated_horizon"
+    return None
+
+
+def _horizon_days(value: str | None) -> int | None:
+    if not value:
+        return None
+    normalized = value.strip().lower()
+    first_part = normalized.split("-")[0].replace("d", "")
+    try:
+        return int(first_part)
+    except ValueError:
+        return None
 
 
 def _horizon(event: EventRecord) -> str:

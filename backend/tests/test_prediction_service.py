@@ -1,11 +1,12 @@
 import json
 from datetime import UTC, datetime
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.db.models import EventRecord
+from app.db.models import Event, EventRecord, FeatureSnapshot, Prediction
 from app.db.session import Base
 from app.services.prediction_service import generate_predictions
 
@@ -57,3 +58,122 @@ def test_generate_predictions_ranks_asset_signals() -> None:
     assert prediction["is_actionable"] is True
     assert prediction["filter_reason"] is None
     assert prediction["drivers"]
+
+
+def test_generate_predictions_applies_min_quality_to_stored_predictions(monkeypatch) -> None:
+    monkeypatch.setattr("app.services.prediction_service.explain_prediction", lambda *args: [])
+
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    Base.metadata.create_all(bind=engine)
+    db = TestingSessionLocal()
+
+    event = Event(
+        timestamp=datetime.now(UTC),
+        event_type="general_market",
+        sentiment=0.1,
+        severity=0.5,
+        raw_text="Stored signal\nMarket update",
+        source="test",
+        model_version="test",
+    )
+    prediction = Prediction(
+        event=event,
+        asset="SPY",
+        predicted_direction="up",
+        confidence=0.6,
+        horizon="1d",
+        model_version="xgboost-v1",
+        timestamp=datetime.now(UTC),
+    )
+    snapshot = FeatureSnapshot(
+        prediction=prediction,
+        event_features={},
+        market_features={"rolling_volatility": 0.01},
+        derived_features={"prediction_model_version": "xgboost-v1"},
+    )
+    db.add(snapshot)
+    db.commit()
+
+    try:
+        default_payload = generate_predictions(db)
+        relaxed_payload = generate_predictions(db, min_quality=0)
+    finally:
+        db.close()
+
+    assert default_payload["count"] == 0
+    assert default_payload["weak_filtered"] == 1
+    assert relaxed_payload["count"] == 1
+    assert relaxed_payload["weak_filtered"] == 0
+    assert relaxed_payload["predictions"][0]["is_actionable"] is True
+
+
+@pytest.mark.parametrize(
+    ("asset", "event_type", "horizon", "expected_reason"),
+    [
+        ("GLD", "general_market", "1d", "gated_asset"),
+        ("SPY", "interest_rate_change", "1d", "gated_event_type"),
+        ("SPY", "general_market", "3d", "gated_horizon"),
+    ],
+)
+def test_generate_predictions_gates_weak_live_segments(
+    monkeypatch,
+    asset: str,
+    event_type: str,
+    horizon: str,
+    expected_reason: str,
+) -> None:
+    monkeypatch.setattr("app.services.prediction_service.explain_prediction", lambda *args: [])
+
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    Base.metadata.create_all(bind=engine)
+    db = TestingSessionLocal()
+
+    event = Event(
+        timestamp=datetime.now(UTC),
+        event_type=event_type,
+        sentiment=0.8,
+        severity=0.8,
+        raw_text="Weak segment signal\nMarket update",
+        source="test",
+        model_version="test",
+    )
+    prediction = Prediction(
+        event=event,
+        asset=asset,
+        predicted_direction="up",
+        confidence=0.9,
+        horizon=horizon,
+        model_version="xgboost-v1",
+        timestamp=datetime.now(UTC),
+    )
+    snapshot = FeatureSnapshot(
+        prediction=prediction,
+        event_features={},
+        market_features={"rolling_volatility": 0.02},
+        derived_features={"prediction_model_version": "xgboost-v1"},
+    )
+    db.add(snapshot)
+    db.commit()
+
+    try:
+        default_payload = generate_predictions(db)
+        weak_payload = generate_predictions(db, include_weak=True)
+    finally:
+        db.close()
+
+    assert default_payload["count"] == 0
+    assert default_payload["weak_filtered"] == 1
+    assert weak_payload["count"] == 1
+    weak_prediction = weak_payload["predictions"][0]
+    assert weak_prediction["is_actionable"] is False
+    assert weak_prediction["filter_reason"] == expected_reason

@@ -9,7 +9,7 @@ News -> LLM classification -> asset mapping -> feature engineering
      -> prediction -> outcome labeling -> model evaluation -> retraining
 ```
 
-Basis is not a trading bot. It is a research-grade system for studying how macro events, market regimes, and asset reactions can be converted into a supervised learning pipeline.
+Basis is a research-grade market intelligence platform for studying how macro events, market regimes, and asset reactions can be converted into a supervised learning pipeline.
 
 ---
 
@@ -90,7 +90,7 @@ This makes predictions auditable after the fact. A model output can be tied back
 
 ### Prediction
 
-`prediction_pipeline.py` builds event, market, and derived features for each mapped asset. `ml_scorer.py` attempts model inference with the trained XGBoost artifacts and falls back to a rule-based baseline scorer when a trained model is unavailable.
+`prediction_pipeline.py` builds event, market, and derived features for each mapped asset. `ml_scorer.py` supports trained XGBoost inference and a deterministic baseline scoring path for transparent comparison.
 
 Runtime model artifacts are loaded from `backend/ml/models/` and refreshed by `model_store.py` when new artifacts are written.
 
@@ -114,9 +114,9 @@ Training data is exported directly from database records, so model training uses
 
 ### Historical Bootstrapping
 
-Basis can seed its ML tables from historical macro events generated from BLS and FRED series. The seeding flow creates historical events, fetches market windows around each event timestamp, stores feature snapshots using only event-time information, and labels 1-day, 3-day, and 5-day future outcomes.
+Basis seeds its ML tables from historical macro events generated from BLS and FRED series. The seeding flow creates historical events, fetches market windows around each event timestamp, stores feature snapshots using event-time information, and labels 1-day, 3-day, and 5-day future outcomes.
 
-Future prices are used only as labels, not as model inputs, to avoid time leakage.
+Future prices are reserved for outcome labels, preserving a clean separation between event-time features and post-event results.
 
 ### Outcome Labeling
 
@@ -125,7 +125,7 @@ Basis tracks both single-horizon and multi-horizon outcomes:
 - `outcome_service.py` labels live predictions using current prices against event-time entry prices.
 - `multi_horizon_service.py` labels 1d, 3d, and 5d exits using historical closes.
 
-Noise filtering prevents tiny price moves from becoming misleading labels. Low-magnitude moves remain pending or skipped depending on the labeling path.
+Noise filtering prevents tiny price moves from becoming misleading labels, keeping the supervised dataset focused on meaningful market reactions.
 
 ### Evaluation
 
@@ -133,12 +133,12 @@ Noise filtering prevents tiny price moves from becoming misleading labels. Low-m
 
 - Overall accuracy
 - Average realized return
-- High-confidence-only performance
+- High-confidence performance
 - Benchmark-relative accuracy
 - Model performance versus simple baselines
 - Performance by asset, event type, horizon, return bucket, and model version
 - Data quality checks
-- Recommendations for whether signals should remain gated
+- Signal readiness recommendations
 
 ### Experiment Tracking
 
@@ -181,7 +181,7 @@ The app includes:
 | Prediction Detail | Forecast case file with feature snapshot and model contributors |
 | Portfolio | Signal-following equity curve, win rate, drawdown, benchmark comparison |
 | ML Lab | Model health, drift, confidence PSI, training history, validation |
-| Data Health | Dataset size, label balance, pending outcomes, validation issues |
+| Data Health | Dataset size, label balance, outcome coverage, validation signals |
 
 The interface is designed as a routed research application rather than a single dashboard, so users can move from a macro event to the affected asset, prediction, outcome, and model explanation.
 
@@ -213,24 +213,11 @@ Basis exposes typed FastAPI endpoints across the main intelligence workflow:
 - OpenAI embeddings for semantic event deduplication
 - yfinance market data integration for live prices, historical windows, and regime context
 - XGBoost classifier with calibration, walk-forward validation, and feature attribution
-- Rule-based baseline scoring fallback when trained artifacts are unavailable
+- Deterministic baseline scoring for model comparison and interpretability
 - Multi-horizon outcome labeling at 1d, 3d, and 5d
 - Model-vs-baseline evaluation and drift detection
 - React 19, TypeScript, Vite, and TailwindCSS frontend
 - Routed intelligence UI with prediction drilldowns, model health panels, and portfolio analytics
-
----
-
-## Current Boundaries
-
-- Model quality depends on the amount and quality of labeled outcome data.
-- Multi-horizon labels require predictions old enough for exit prices to exist.
-- The model is a directional research model, not an execution engine.
-- Market data availability and API reliability can affect ingestion, labeling, and backtests.
-- The application uses polling and refresh patterns rather than WebSockets.
-- Runtime model artifacts are generated outputs and are intentionally not versioned with source code.
-
----
 
 ## Disclaimer
 

@@ -1,33 +1,50 @@
-# Basis
+# Recona
 
-Basis is a full-stack AI financial intelligence system for turning real-world macro news into structured market events, asset-level predictions, labeled outcomes, model health signals, and an interactive research interface.
+Recona is a full-stack AI macro intelligence system that turns real-world financial news and economic releases into structured market events, asset-level forecasts, labeled outcomes, model health signals, and an interactive research interface.
 
-It is built around a continuous intelligence loop:
+## Links
+
+Recona: https://recona-ai.vercel.app/
+
+The system is built around a continuous intelligence loop:
 
 ```text
-News -> LLM classification -> asset mapping -> feature engineering
+News -> event classification -> asset mapping -> feature engineering
      -> prediction -> outcome labeling -> model evaluation -> retraining
 ```
 
-Basis is a research-grade market intelligence platform for studying how macro events, market regimes, and asset reactions can be converted into a supervised learning pipeline.
+Recona treats macro information as data. Inflation releases, rate decisions, geopolitical events, supply shocks, energy disruptions, earnings surprises, and broad risk-on or risk-off shifts are converted into a normalized event schema. Those events are mapped to affected assets, scored by a prediction pipeline, tracked against future market movement, and folded back into the model lifecycle.
 
----
+## Why Recona Exists
 
-## Live App
+Markets absorb information quickly, but the reasoning chain behind a market move is often scattered across articles, data releases, asset reactions, and model outputs. Recona brings that chain into one place.
 
-[Open Basis](https://basis-intel.vercel.app)
+The goal is to make macro intelligence inspectable. A user can move from a source event to its classification, mapped assets, prediction confidence, feature snapshot, model drivers, realized outcome, historical performance, market regime context, and retraining history without losing the thread.
 
----
+Recona is designed for studying how macro events become machine-learning examples. Each event is not only a news item; it becomes a structured record with context, features, predictions, outcomes, and evaluation metadata. Over time, the system builds a supervised learning dataset from the same workflow that powers the live application.
 
-## Product Concept
+## Product Description
 
-Financial markets react to events: inflation releases, rate decisions, geopolitical conflict, supply shocks, earnings surprises, energy disruptions, and broad risk-on/risk-off shifts. Basis treats each article or macro release as a candidate event, classifies it into a normalized schema, maps it to affected assets, creates model features, and tracks whether the resulting forecast was directionally correct over time.
+Recona is organized as a routed research workspace rather than a single dashboard. The interface connects macro events, affected assets, predictions, portfolio simulations, model health, market regime data, and training data quality into one navigable application.
 
-The goal is to make the model lifecycle visible. Basis shows the source event, classification reasoning, mapped assets, prediction confidence, feature snapshot, SHAP-style model drivers, realized outcome, historical accuracy, model drift, and retraining history in one connected application.
+Core surfaces include:
 
----
+| Surface | Purpose |
+|---|---|
+| Overview | Macro pulse, latest risks, model readiness, and current market state |
+| Events | Searchable feed of classified macro events |
+| Event Detail | Article context, classification reasoning, and mapped assets |
+| Assets | Asset impact table with linked event and prediction context |
+| Asset Detail | Related events, prices, signal history, and accuracy |
+| Predictions | Ranked forecasts with confidence, horizon, source event, and model version |
+| Prediction Detail | Forecast case file with feature snapshot and model contributors |
+| Portfolio | Signal-following equity curve, win rate, drawdown, and benchmark comparison |
+| ML Lab | Model health, drift, confidence PSI, training history, and validation metrics |
+| Data Health | Dataset size, label balance, outcome coverage, and training-data signals |
 
-## System Architecture
+The application is built to make the lifecycle visible: source event, structured interpretation, asset exposure, prediction, realized result, and model feedback all remain connected.
+
+## Technical Breakdown
 
 ```text
 backend/
@@ -53,149 +70,99 @@ frontend/
     lib/                     API client and frontend data helpers
 ```
 
-The backend is a FastAPI service with SQLAlchemy persistence, APScheduler background jobs, yfinance market data, OpenAI-based event classification, and an XGBoost model pipeline. The frontend is a React 19 + TypeScript + Vite app with a dark quant-terminal interface.
-
----
-
-## Backend Pipeline
+The backend is a FastAPI service with SQLAlchemy persistence, APScheduler background jobs, yfinance market data, OpenAI-based event classification, OpenAI embeddings for semantic deduplication, and an XGBoost model pipeline. The frontend is a React 19, TypeScript, Vite, and TailwindCSS application with a dark quant-terminal interface.
 
 ### Ingestion
 
-`ingestion_service.py` fetches market-relevant news, filters articles by financial keywords, classifies each article into a structured macro event, maps it to affected assets, captures current market prices, persists an event record, and triggers the prediction pipeline.
+`ingestion_service.py` fetches market-relevant news, filters articles by financial keywords, classifies each article into a structured macro event, maps the event to affected assets, captures current market prices, persists the event record, and triggers prediction generation.
 
-Incoming articles are deduplicated through exact content hashing and semantic similarity using OpenAI embeddings. Duplicate articles reuse existing event records instead of creating noisy repeated samples.
+Incoming articles are deduplicated with exact content hashing and semantic similarity using OpenAI embeddings. Repeated coverage can reuse existing event records so the dataset stays centered on distinct market events.
 
 ### Event Classification
 
-`event_classifier.py` converts raw article text into a strict JSON schema:
+`event_classifier.py` converts raw article text into a structured schema:
 
-- `event_type`
-- `affected_sectors`
-- `impact_direction`
-- `confidence`
-- `severity`
-- `reasoning`
+| Field | Role |
+|---|---|
+| `event_type` | Normalized macro category |
+| `affected_sectors` | Sectors connected to the event |
+| `impact_direction` | Expected directional pressure |
+| `confidence` | Classifier confidence |
+| `severity` | Estimated market relevance |
+| `reasoning` | Short explanation of the classification |
 
-The classifier is intentionally constrained to known event, sector, direction, and severity enums so downstream features stay stable.
+The classifier uses known event, sector, direction, and severity enums so downstream features remain consistent across ingestion, prediction, training, and evaluation.
 
 ### Asset Mapping
 
-`mapping_service.py` links classified events to relevant ETFs and assets. This lets one macro event fan out into multiple asset-level predictions while preserving a shared event source.
+`mapping_service.py` links classified events to relevant ETFs and assets. One macro event can fan out into multiple asset-level predictions while preserving a shared event source.
 
 ### Feature Engineering
 
-Each prediction stores a `FeatureSnapshot` with three feature groups:
+Each prediction stores a `FeatureSnapshot` with event, market, and derived features.
 
 | Group | Examples |
 |---|---|
-| Event features | event type encoding, sentiment, severity, timestamp, embedding similarity |
-| Market features | price, recent returns, relative strength, volatility, asset class encoding |
-| Derived features | baseline score, event-market interactions, historical accuracy, regime features |
+| Event features | Event type encoding, sentiment, severity, timestamp, embedding similarity |
+| Market features | Price, recent returns, relative strength, volatility, asset class encoding |
+| Derived features | Baseline score, event-market interactions, historical accuracy, regime features |
 
-This makes predictions auditable after the fact. A model output can be tied back to the exact event, market state, and engineered feature set used at prediction time.
+Feature snapshots make predictions auditable after generation. A model output can be tied back to the event, market state, and engineered feature set used at prediction time.
 
 ### Prediction
 
-`prediction_pipeline.py` builds event, market, and derived features for each mapped asset. `ml_scorer.py` supports trained XGBoost inference and a deterministic baseline scoring path for transparent comparison.
+`prediction_pipeline.py` builds event, market, and derived features for each mapped asset. `ml_scorer.py` supports trained XGBoost inference alongside a deterministic baseline scoring path for comparison and interpretability.
 
-Runtime model artifacts are loaded from `backend/ml/models/` and refreshed by `model_store.py` when new artifacts are written.
+Runtime model artifacts are loaded from `backend/ml/models/` and refreshed by `model_store.py` when updated artifacts are written.
 
----
+### Training And Labeling
 
-## ML System
-
-### Training
-
-`ml/train_model.py` trains a supervised classifier from labeled prediction outcomes. The training flow includes:
-
-- Walk-forward cross-validation using expanding time windows
-- XGBoost versus logistic regression comparison
-- ROC-AUC, accuracy, and class balance tracking
-- Platt calibration for probability quality
-- Brier score and calibration improvement reporting
-- Confidence bucket analysis
-- Feature importance and SHAP summary outputs
+`ml/train_model.py` trains a supervised classifier from labeled prediction outcomes. The training flow includes walk-forward cross-validation, XGBoost versus logistic regression comparison, ROC-AUC, accuracy, class balance tracking, Platt calibration, Brier score reporting, confidence bucket analysis, feature importance, and SHAP summary outputs.
 
 Training data is exported directly from database records, so model training uses the same event, prediction, feature snapshot, and outcome tables that power the application.
 
-### Historical Bootstrapping
+Historical bootstrapping creates seed macro events from BLS and FRED series, fetches market windows around each event timestamp, stores event-time feature snapshots, and labels 1-day, 3-day, and 5-day outcomes.
 
-Basis seeds its ML tables from historical macro events generated from BLS and FRED series. The seeding flow creates historical events, fetches market windows around each event timestamp, stores feature snapshots using event-time information, and labels 1-day, 3-day, and 5-day future outcomes.
+Live and historical labeling are handled through:
 
-Future prices are reserved for outcome labels, preserving a clean separation between event-time features and post-event results.
+| Service | Role |
+|---|---|
+| `outcome_service.py` | Labels live predictions using current prices against event-time entry prices |
+| `multi_horizon_service.py` | Labels 1-day, 3-day, and 5-day exits using historical closes |
+| `model_evaluation_service.py` | Aggregates labeled outcomes into performance and readiness metrics |
 
-### Outcome Labeling
+### Model Evaluation
 
-Basis tracks both single-horizon and multi-horizon outcomes:
+Recona evaluates labeled outcomes across the prediction lifecycle:
 
-- `outcome_service.py` labels live predictions using current prices against event-time entry prices.
-- `multi_horizon_service.py` labels 1d, 3d, and 5d exits using historical closes.
+| Metric Area | Examples |
+|---|---|
+| Accuracy | Overall accuracy, high-confidence accuracy, benchmark-relative accuracy |
+| Returns | Average realized return, return buckets, portfolio simulation |
+| Segments | Performance by asset, event type, horizon, and model version |
+| Model comparison | XGBoost performance against deterministic baselines |
+| Training history | Dataset size, train/test counts, ROC-AUC, calibration, label balance |
+| Drift monitoring | Rolling accuracy and confidence distribution PSI |
 
-Noise filtering prevents tiny price moves from becoming misleading labels, keeping the supervised dataset focused on meaningful market reactions.
+Every training run is stored in `training_runs` with validation metrics, model comparison results, top features, and label balance.
 
-### Evaluation
+### Background Jobs
 
-`model_evaluation_service.py` combines labeled outcomes without double-counting and reports:
-
-- Overall accuracy
-- Average realized return
-- High-confidence performance
-- Benchmark-relative accuracy
-- Model performance versus simple baselines
-- Performance by asset, event type, horizon, return bucket, and model version
-- Data quality checks
-- Signal readiness recommendations
-
-### Experiment Tracking
-
-Every training run is persisted to `training_runs`, including dataset size, train/test counts, accuracy, ROC-AUC, calibration metrics, walk-forward CV metrics, model comparison results, top features, and label balance.
-
-### Drift Detection
-
-`training_run_service.py` computes rolling model health by comparing recent labeled accuracy and prediction confidence distribution against the training history. Confidence drift uses Population Stability Index, and accuracy drift compares recent performance against the latest training benchmark.
-
----
-
-## Background Jobs
-
-Basis runs continuous jobs through APScheduler:
+Recona runs continuous jobs through APScheduler:
 
 | Job | Interval | Responsibility |
 |---|---:|---|
 | Ingestion | 15 minutes | Fetch news, classify events, map assets, generate predictions |
-| Outcome computation | 1 hour | Label eligible predictions and check retraining threshold |
-| Signal evaluation | 1 hour | Evaluate legacy signal backtest records |
+| Outcome computation | 1 hour | Label eligible predictions and check retraining thresholds |
+| Signal evaluation | 1 hour | Evaluate signal and backtest records |
 
-Automatic retraining is triggered when the labeled dataset grows by at least 25 samples since the last recorded training run.
+Automatic retraining is triggered when enough newly labeled samples have accumulated since the latest recorded training run.
 
----
+### Market Intelligence
 
-## Market Intelligence Features
+Recona includes live market regime features from VIX, SPY trend, and 10-year yield data. These regime encodings are injected into prediction features and surfaced in the UI so forecasts can be read alongside broader market conditions.
 
-Basis includes live market regime features from VIX, SPY trend, and 10-year yield data. These regime encodings are injected into prediction features and surfaced in the UI.
-
-The app includes:
-
-| Surface | Purpose |
-|---|---|
-| Overview | Macro pulse, latest risks, model readiness, market state |
-| Events | Searchable feed of classified macro events |
-| Event Detail | Article context, classification reasoning, mapped assets |
-| Assets | Asset impact table with event and prediction context |
-| Asset Detail | Linked events, prices, signal history, accuracy |
-| Predictions | Ranked forecasts with confidence, horizon, source event, model version |
-| Prediction Detail | Forecast case file with feature snapshot and model contributors |
-| Portfolio | Signal-following equity curve, win rate, drawdown, benchmark comparison |
-| ML Lab | Model health, drift, confidence PSI, training history, validation |
-| Data Health | Dataset size, label balance, outcome coverage, validation signals |
-
-The interface is designed as a routed research application rather than a single dashboard, so users can move from a macro event to the affected asset, prediction, outcome, and model explanation.
-
----
-
-## API Surface
-
-Basis exposes typed FastAPI endpoints across the main intelligence workflow:
+The API exposes typed FastAPI endpoints across the intelligence workflow:
 
 | Area | Examples |
 |---|---|
@@ -208,8 +175,6 @@ Basis exposes typed FastAPI endpoints across the main intelligence workflow:
 | Portfolio and signals | `/backtest/run`, `/backtest/summary`, `/backtest/portfolio`, `/signals/accuracy` |
 | Watchlist intelligence | `/watchlist/impact` |
 
----
-
 ## Technical Highlights
 
 - FastAPI service architecture with modular routers and dependency-injected database sessions
@@ -220,11 +185,7 @@ Basis exposes typed FastAPI endpoints across the main intelligence workflow:
 - yfinance market data integration for live prices, historical windows, and regime context
 - XGBoost classifier with calibration, walk-forward validation, and feature attribution
 - Deterministic baseline scoring for model comparison and interpretability
-- Multi-horizon outcome labeling at 1d, 3d, and 5d
-- Model-vs-baseline evaluation and drift detection
+- Multi-horizon outcome labeling at 1-day, 3-day, and 5-day windows
+- Model-versus-baseline evaluation and drift detection
 - React 19, TypeScript, Vite, and TailwindCSS frontend
 - Routed intelligence UI with prediction drilldowns, model health panels, and portfolio analytics
-
-## Disclaimer
-
-Basis is for software engineering, ML systems, and financial research demonstration purposes only. It is not financial advice, investment advice, or a trading system.

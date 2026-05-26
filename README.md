@@ -13,6 +13,12 @@ Basis is a research-grade market intelligence platform for studying how macro ev
 
 ---
 
+## Live App
+
+[Open Basis](https://basis-intel.vercel.app)
+
+---
+
 ## Product Concept
 
 Financial markets react to events: inflation releases, rate decisions, geopolitical conflict, supply shocks, earnings surprises, energy disruptions, and broad risk-on/risk-off shifts. Basis treats each article or macro release as a candidate event, classifies it into a normalized schema, maps it to affected assets, creates model features, and tracks whether the resulting forecast was directionally correct over time.

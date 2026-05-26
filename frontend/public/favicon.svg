@@ -2,7 +2,7 @@
   <rect width="64" height="64" rx="14" fill="#07130f"/>
   <rect x="4" y="4" width="56" height="56" rx="12" fill="#0b1f17" stroke="#00e676" stroke-width="4"/>
   <path
-    d="M32 12v40M32 18c-7 0-11 4-11 10 0 4 2 7 6 8M32 18c7 0 11 4 11 10 0 4-2 7-6 8M32 32H20M32 32h12M24 24h-5M40 24h5M24 40h-5M40 40h5M27 36c-3 2-5 5-5 9M37 36c3 2 5 5 5 9"
+    d="M32 12v40M32 20h-8M32 20h8M24 20c-5 0-8 3-8 8 0 4 3 7 8 7M40 20c5 0 8 3 8 8 0 4-3 7-8 7M32 32H20M32 32h12M24 35c-5 0-8 3-8 8M40 35c5 0 8 3 8 8M24 25h-5M40 25h5M24 43h-5M40 43h5"
     fill="none"
     stroke="#00e676"
     stroke-width="4"

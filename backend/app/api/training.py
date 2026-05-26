@@ -131,6 +131,7 @@ def train_model(
         "walk_forward_cv": payload["walk_forward_cv"],
         "model_comparison": payload["model_comparison"],
         "calibration": payload["calibration"],
+        "decision_threshold": payload["decision_threshold"],
         "top_features": payload["top_features"],
         "shap_summary": payload["shap_summary"],
         "confidence_analysis": payload["confidence_analysis"],

@@ -18,11 +18,17 @@ def score_with_ml_model(
     fallback: BaselinePrediction,
 ) -> tuple[BaselinePrediction, str]:
     """Return (prediction, model_version). Uses calibrated model when available, falls back to baseline."""
-    from ml.model_store import get_calibrated_model, get_feature_names, get_model
+    from ml.model_store import (
+        get_calibrated_model,
+        get_decision_threshold,
+        get_feature_names,
+        get_model,
+    )
 
     feature_names = get_feature_names()
     calibrated = get_calibrated_model()
     raw = get_model()
+    threshold = get_decision_threshold()
 
     predictor = calibrated or raw
     if predictor is None or feature_names is None:
@@ -35,7 +41,7 @@ def score_with_ml_model(
         proba = predictor.predict_proba(X)[0]
         p_up = float(proba[1])
 
-        direction: PredictionDirection = "up" if p_up >= 0.5 else "down"
+        direction: PredictionDirection = "up" if p_up >= threshold else "down"
         confidence = round(max(p_up, 1.0 - p_up), 4)
         score = round(p_up * 2.0 - 1.0, 6)
 

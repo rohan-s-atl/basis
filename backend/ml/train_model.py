@@ -24,6 +24,7 @@ _MODELS_DIR = Path(__file__).resolve().parent / "models"
 DEFAULT_MODEL_PATH = _MODELS_DIR / "xgboost_model.json"
 DEFAULT_CALIBRATED_PATH = _MODELS_DIR / "calibrated_model.pkl"
 DEFAULT_FEATURE_NAMES_PATH = _MODELS_DIR / "feature_names.json"
+DEFAULT_DECISION_THRESHOLD_PATH = _MODELS_DIR / "decision_threshold.json"
 
 TRAIN_FRACTION = 0.8
 MIN_FOLD_SAMPLES = 5
@@ -68,6 +69,14 @@ class WalkForwardCV:
 
 
 @dataclass(frozen=True)
+class DecisionThreshold:
+    threshold: float
+    accuracy: float
+    default_accuracy: float
+    positive_rate: float
+
+
+@dataclass(frozen=True)
 class TrainingResult:
     dataset_size: int
     label_balance: dict[str, float | int]
@@ -82,6 +91,7 @@ class TrainingResult:
     walk_forward_cv: WalkForwardCV
     model_comparison: ModelComparison
     calibration: CalibrationMetrics
+    decision_threshold: DecisionThreshold
     model_path: str
     calibrated_model_path: str
 
@@ -264,6 +274,36 @@ def confidence_analysis(
     return results
 
 
+def optimize_decision_threshold(
+    y_true: pd.Series,
+    positive_probabilities: np.ndarray,
+) -> DecisionThreshold:
+    default_pred = (positive_probabilities >= 0.5).astype(int)
+    default_accuracy = float(accuracy_score(y_true, default_pred))
+    best_threshold = 0.5
+    best_accuracy = default_accuracy
+    best_positive_rate = float(default_pred.mean()) if len(default_pred) else 0.0
+
+    # Keep the search away from degenerate all-up/all-down cutoffs.
+    for threshold in np.arange(0.30, 0.701, 0.005):
+        pred = (positive_probabilities >= threshold).astype(int)
+        positive_rate = float(pred.mean()) if len(pred) else 0.0
+        if positive_rate < 0.05 or positive_rate > 0.95:
+            continue
+        acc = float(accuracy_score(y_true, pred))
+        if acc > best_accuracy or (acc == best_accuracy and abs(threshold - 0.5) < abs(best_threshold - 0.5)):
+            best_threshold = float(threshold)
+            best_accuracy = acc
+            best_positive_rate = positive_rate
+
+    return DecisionThreshold(
+        threshold=round(best_threshold, 4),
+        accuracy=round(best_accuracy, 4),
+        default_accuracy=round(default_accuracy, 4),
+        positive_rate=round(best_positive_rate, 4),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Feature importance (XGBoost gain)
 # ---------------------------------------------------------------------------
@@ -287,6 +327,7 @@ def train_xgboost_model(
     model_path: str | Path = DEFAULT_MODEL_PATH,
     calibrated_path: str | Path = DEFAULT_CALIBRATED_PATH,
     feature_names_path: str | Path = DEFAULT_FEATURE_NAMES_PATH,
+    decision_threshold_path: str | Path = DEFAULT_DECISION_THRESHOLD_PATH,
     timeout: float = 30.0,
 ) -> TrainingResult:
     data = training_data_from_payload(dataset) if dataset is not None else load_training_data(
@@ -298,6 +339,7 @@ def train_xgboost_model(
         model_path=model_path,
         calibrated_path=calibrated_path,
         feature_names_path=feature_names_path,
+        decision_threshold_path=decision_threshold_path,
     )
 
 
@@ -307,12 +349,14 @@ def train_xgboost_from_payload(
     model_path: str | Path = DEFAULT_MODEL_PATH,
     calibrated_path: str | Path = DEFAULT_CALIBRATED_PATH,
     feature_names_path: str | Path = DEFAULT_FEATURE_NAMES_PATH,
+    decision_threshold_path: str | Path = DEFAULT_DECISION_THRESHOLD_PATH,
 ) -> TrainingResult:
     return train_xgboost_from_data(
         training_data_from_payload(payload),
         model_path=model_path,
         calibrated_path=calibrated_path,
         feature_names_path=feature_names_path,
+        decision_threshold_path=decision_threshold_path,
     )
 
 
@@ -322,6 +366,7 @@ def train_xgboost_from_data(
     model_path: str | Path = DEFAULT_MODEL_PATH,
     calibrated_path: str | Path = DEFAULT_CALIBRATED_PATH,
     feature_names_path: str | Path = DEFAULT_FEATURE_NAMES_PATH,
+    decision_threshold_path: str | Path = DEFAULT_DECISION_THRESHOLD_PATH,
 ) -> TrainingResult:
     _validate_training_data(data)
 
@@ -348,8 +393,9 @@ def train_xgboost_from_data(
     cal_metrics = calibration_metrics(xgb, calibrated, X_test, y_test)
 
     # Final evaluation using calibrated model
-    y_pred = np.array(calibrated.predict(X_test))
     cal_proba = calibrated.predict_proba(X_test)[:, 1]
+    threshold = optimize_decision_threshold(y_test, cal_proba)
+    y_pred = (cal_proba >= threshold.threshold).astype(int)
     accuracy = round(float(accuracy_score(y_test, y_pred)), 4)
     roc_auc = _safe_roc_auc(y_test, cal_proba)
     report = classification_report(y_test, y_pred, output_dict=True, zero_division=0)
@@ -361,11 +407,13 @@ def train_xgboost_from_data(
     out_model = Path(model_path)
     out_cal = Path(calibrated_path)
     out_names = Path(feature_names_path)
+    out_threshold = Path(decision_threshold_path)
     out_model.parent.mkdir(parents=True, exist_ok=True)
 
     xgb.save_model(out_model)
     joblib.dump(calibrated, out_cal)
     out_names.write_text(json.dumps(data.feature_names))
+    out_threshold.write_text(json.dumps(asdict(threshold)))
 
     result = TrainingResult(
         dataset_size=len(data.y),
@@ -381,6 +429,7 @@ def train_xgboost_from_data(
         walk_forward_cv=cv_result,
         model_comparison=comparison,
         calibration=cal_metrics,
+        decision_threshold=threshold,
         model_path=str(out_model),
         calibrated_model_path=str(out_cal),
     )
@@ -398,6 +447,8 @@ def print_training_summary(result: TrainingResult) -> None:
           f"(train={result.train_size}, test={result.test_size})")
     print(f"Label balance:  {result.label_balance}")
     print(f"\nAccuracy (calibrated):  {result.accuracy:.4f}")
+    print(f"Decision threshold:     {result.decision_threshold.threshold:.4f} "
+          f"(default acc={result.decision_threshold.default_accuracy:.4f})")
     print(f"ROC AUC (calibrated):   "
           f"{result.roc_auc:.4f}" if result.roc_auc is not None else "ROC AUC: N/A")
 
@@ -432,7 +483,7 @@ def result_to_dict(result: TrainingResult) -> dict[str, Any]:
     payload["calibrated_accuracy"] = result.accuracy
     payload["calibrated_roc_auc"] = result.roc_auc
     payload["deployment_accuracy"] = result.accuracy
-    payload["accuracy_metric"] = "calibrated_accuracy"
+    payload["accuracy_metric"] = "threshold_optimized_calibrated_accuracy"
     return payload
 
 

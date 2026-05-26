@@ -259,6 +259,7 @@ export type TrainingRun = {
   xgboost_roc_auc: number | null;
   logistic_roc_auc: number | null;
   winner_model: string;
+  comparison_winner?: string;
   top_features: FeatureImportance[];
   label_balance: LabelBalance;
 };

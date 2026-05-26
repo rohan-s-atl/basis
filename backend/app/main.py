@@ -7,6 +7,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.core.config import settings
+
 try:
     from apscheduler.schedulers.background import BackgroundScheduler
 except ModuleNotFoundError:
@@ -137,8 +139,12 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
-    allow_origin_regex=r"http://(127\.0\.0\.1|localhost):\d+",
+    allow_origins=[
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+        *settings.frontend_origins,
+    ],
+    allow_origin_regex=r"https://.*\.up\.railway\.app|http://(127\.0\.0\.1|localhost):\d+",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

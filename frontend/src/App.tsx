@@ -449,7 +449,7 @@ function App() {
 
           {apiStatus === "error" && (
             <div className="mx-4 mt-4 rounded-lg border border-quant-red/40 bg-quant-red/10 px-4 py-3 text-sm text-quant-text lg:mx-7">
-              Unable to load macro events. Confirm the backend is running on 127.0.0.1:8000. {errorMessage && <span className="text-quant-muted">({errorMessage})</span>}
+              Unable to load macro events. Confirm the API URL is reachable. {errorMessage && <span className="text-quant-muted">({errorMessage})</span>}
             </div>
           )}
 
@@ -1363,7 +1363,7 @@ function TrainingRunPage({ history, index }: { history: TrainingRun[]; index: nu
           <DetailStat label="Deployed accuracy" value={`${((run.deployment_accuracy ?? run.calibrated_accuracy ?? run.accuracy) * 100).toFixed(1)}%`} />
           <DetailStat label="ROC AUC" value={run.roc_auc?.toFixed(3) ?? "n/a"} />
           <DetailStat label="Dataset" value={run.dataset_size.toString()} />
-          <DetailStat label="Winner" value={run.winner_model} />
+          <DetailStat label="Comparison winner" value={run.comparison_winner ?? run.winner_model} />
         </div>
         <section className="mt-5 rounded-lg border border-quant-line bg-quant-panel2 p-4">
           <p className="quant-eyebrow mb-3">Top features</p>

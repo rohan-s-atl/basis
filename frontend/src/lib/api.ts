@@ -2,14 +2,19 @@ import type { BacktestSummary, EventRecord, MarketHistory, MarketRegime, ModelEv
 
 const configuredApiUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
 
-const API_BASE_URLS = configuredApiUrl
-  ? Array.from(
-      new Set([
-        configuredApiUrl,
-        "http://127.0.0.1:8000",
-        "http://127.0.0.1:8001"
-      ])
-    )
+const normalizedConfiguredApiUrl = configuredApiUrl?.replace(/\/$/, "");
+const isProduction = import.meta.env.PROD;
+
+const API_BASE_URLS = normalizedConfiguredApiUrl
+  ? isProduction
+    ? [normalizedConfiguredApiUrl]
+    : Array.from(
+        new Set([
+          normalizedConfiguredApiUrl,
+          "http://127.0.0.1:8000",
+          "http://127.0.0.1:8001"
+        ])
+      )
   : ["http://127.0.0.1:8000", "http://127.0.0.1:8001"];
 
 export async function fetchCombinedEvents(): Promise<{

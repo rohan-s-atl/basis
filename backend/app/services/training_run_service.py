@@ -284,6 +284,7 @@ def _run_to_dict(run: TrainingRun) -> dict[str, Any]:
         "xgboost_roc_auc": run.xgboost_roc_auc,
         "logistic_roc_auc": run.logistic_roc_auc,
         "winner_model": run.winner_model,
+        "comparison_winner": run.winner_model,
         "top_features": json.loads(run.top_features),
         "label_balance": json.loads(run.label_balance),
     }

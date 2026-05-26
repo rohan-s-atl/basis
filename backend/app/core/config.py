@@ -26,6 +26,11 @@ def _default_database_url() -> str:
 
 class Settings:
     database_url: str = _normalize_database_url(os.getenv("DATABASE_URL") or _default_database_url())
+    frontend_origins: list[str] = [
+        origin.strip()
+        for origin in os.getenv("FRONTEND_ORIGINS", "").split(",")
+        if origin.strip()
+    ]
     news_api_key: str | None = os.getenv("NEWS_API_KEY")
     news_api_url: str = os.getenv(
         "NEWS_API_URL",

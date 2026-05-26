@@ -1,12 +1,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <rect width="64" height="64" rx="14" fill="#07130f"/>
   <rect x="4" y="4" width="56" height="56" rx="12" fill="#0b1f17" stroke="#00e676" stroke-width="4"/>
-  <path
-    d="M32 12v40M32 20h-8M32 20h8M24 20c-5 0-8 3-8 8 0 4 3 7 8 7M40 20c5 0 8 3 8 8 0 4-3 7-8 7M32 32H20M32 32h12M24 35c-5 0-8 3-8 8M40 35c5 0 8 3 8 8M24 25h-5M40 25h5M24 43h-5M40 43h5"
-    fill="none"
-    stroke="#00e676"
-    stroke-width="4"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-  />
+  <svg x="10" y="10" width="44" height="44" viewBox="0 0 24 24" fill="none">
+    <g stroke="#00e676" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/>
+      <path d="M9 13a4.5 4.5 0 0 0 3-4"/>
+      <path d="M6.003 5.125A3 3 0 0 0 6.401 6.5"/>
+      <path d="M3.477 10.896a4 4 0 0 1 .585-.396"/>
+      <path d="M6 18a4 4 0 0 1-1.967-.516"/>
+      <path d="M12 13h4"/>
+      <path d="M12 18h6a2 2 0 0 1 2 2v1"/>
+      <path d="M12 8h8"/>
+      <path d="M16 8V5a2 2 0 0 1 2-2"/>
+      <circle cx="16" cy="13" r=".5" fill="#00e676"/>
+      <circle cx="18" cy="3" r=".5" fill="#00e676"/>
+      <circle cx="20" cy="21" r=".5" fill="#00e676"/>
+      <circle cx="20" cy="8" r=".5" fill="#00e676"/>
+    </g>
+  </svg>
 </svg>

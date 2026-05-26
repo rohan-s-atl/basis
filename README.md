@@ -1,10 +1,10 @@
-# Recona
+# Basis
 
-Recona is a full-stack AI macro intelligence system that turns real-world financial news and economic releases into structured market events, asset-level forecasts, labeled outcomes, model health signals, and an interactive research interface.
+Basis is a full-stack AI macro intelligence system that turns real-world financial news and economic releases into structured market events, asset-level forecasts, labeled outcomes, model health signals, and an interactive research interface.
 
 ## Links
 
-Recona: https://recona-ai.vercel.app/
+Basis: https://basis-intel.vercel.app/
 
 The system is built around a continuous intelligence loop:
 
@@ -13,19 +13,19 @@ News -> event classification -> asset mapping -> feature engineering
      -> prediction -> outcome labeling -> model evaluation -> retraining
 ```
 
-Recona treats macro information as data. Inflation releases, rate decisions, geopolitical events, supply shocks, energy disruptions, earnings surprises, and broad risk-on or risk-off shifts are converted into a normalized event schema. Those events are mapped to affected assets, scored by a prediction pipeline, tracked against future market movement, and folded back into the model lifecycle.
+Basis treats macro information as data. Inflation releases, rate decisions, geopolitical events, supply shocks, energy disruptions, earnings surprises, and broad risk-on or risk-off shifts are converted into a normalized event schema. Those events are mapped to affected assets, scored by a prediction pipeline, tracked against future market movement, and folded back into the model lifecycle.
 
-## Why Recona Exists
+## Why Basis Exists
 
-Markets absorb information quickly, but the reasoning chain behind a market move is often scattered across articles, data releases, asset reactions, and model outputs. Recona brings that chain into one place.
+Markets absorb information quickly, but the reasoning chain behind a market move is often scattered across articles, data releases, asset reactions, and model outputs. Basis brings that chain into one place.
 
 The goal is to make macro intelligence inspectable. A user can move from a source event to its classification, mapped assets, prediction confidence, feature snapshot, model drivers, realized outcome, historical performance, market regime context, and retraining history without losing the thread.
 
-Recona is designed for studying how macro events become machine-learning examples. Each event is not only a news item; it becomes a structured record with context, features, predictions, outcomes, and evaluation metadata. Over time, the system builds a supervised learning dataset from the same workflow that powers the live application.
+Basis is designed for studying how macro events become machine-learning examples. Each event is not only a news item; it becomes a structured record with context, features, predictions, outcomes, and evaluation metadata. Over time, the system builds a supervised learning dataset from the same workflow that powers the live application.
 
 ## Product Description
 
-Recona is organized as a routed research workspace rather than a single dashboard. The interface connects macro events, affected assets, predictions, portfolio simulations, model health, market regime data, and training data quality into one navigable application.
+Basis is organized as a routed research workspace rather than a single dashboard. The interface connects macro events, affected assets, predictions, portfolio simulations, model health, market regime data, and training data quality into one navigable application.
 
 Core surfaces include:
 
@@ -133,7 +133,7 @@ Live and historical labeling are handled through:
 
 ### Model Evaluation
 
-Recona evaluates labeled outcomes across the prediction lifecycle:
+Basis evaluates labeled outcomes across the prediction lifecycle:
 
 | Metric Area | Examples |
 |---|---|
@@ -148,7 +148,7 @@ Every training run is stored in `training_runs` with validation metrics, model c
 
 ### Background Jobs
 
-Recona runs continuous jobs through APScheduler:
+Basis runs continuous jobs through APScheduler:
 
 | Job | Interval | Responsibility |
 |---|---:|---|
@@ -160,7 +160,7 @@ Automatic retraining is triggered when enough newly labeled samples have accumul
 
 ### Market Intelligence
 
-Recona includes live market regime features from VIX, SPY trend, and 10-year yield data. These regime encodings are injected into prediction features and surfaced in the UI so forecasts can be read alongside broader market conditions.
+Basis includes live market regime features from VIX, SPY trend, and 10-year yield data. These regime encodings are injected into prediction features and surfaced in the UI so forecasts can be read alongside broader market conditions.
 
 The API exposes typed FastAPI endpoints across the intelligence workflow:
 

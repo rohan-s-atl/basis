@@ -1,6 +1,7 @@
 import json
 from datetime import datetime
 
+from sqlalchemy.dialects.postgresql import insert as postgres_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
@@ -38,7 +39,11 @@ def upsert_event_record(
         # Never overwrite an existing price with None
         del update_set["price_at_event"]
 
-    stmt = sqlite_insert(EventRecord).values(**values)
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        stmt = postgres_insert(EventRecord).values(**values)
+    else:
+        stmt = sqlite_insert(EventRecord).values(**values)
+
     db.execute(stmt.on_conflict_do_update(index_elements=["article_hash"], set_=update_set))
     db.commit()
 

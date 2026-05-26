@@ -39,6 +39,9 @@ def _migrate_columns() -> None:
 
 
 def _column_exists(conn, table: str, column: str) -> bool:
+    if engine.dialect.name != "sqlite":
+        return True
+
     rows = conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
     return any(row[1] == column for row in rows)
 
@@ -91,6 +94,9 @@ def _migrate_event_content_hash() -> None:
 
 def _fix_outcomes_nullable_label() -> None:
     """Rebuild outcomes table if label column was created NOT NULL (old schema)."""
+    if engine.dialect.name != "sqlite":
+        return
+
     with engine.connect() as conn:
         rows = conn.execute(text("PRAGMA table_info(outcomes)")).fetchall()
         label_col = next((r for r in rows if r[1] == "label"), None)
@@ -172,6 +178,10 @@ def _backfill_derived_columns() -> None:
 def init_db() -> None:
     ensure_sqlite_parent_directory(settings.database_url)
     Base.metadata.create_all(bind=engine)
+
+    if engine.dialect.name != "sqlite":
+        return
+
     _migrate_columns()
     _fix_outcomes_nullable_label()
     _backfill_derived_columns()

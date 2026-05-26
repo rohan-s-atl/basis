@@ -6,6 +6,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def _normalize_database_url(database_url: str) -> str:
+    if database_url.startswith("postgres://"):
+        return database_url.replace("postgres://", "postgresql+psycopg2://", 1)
+    if database_url.startswith("postgresql://"):
+        return database_url.replace("postgresql://", "postgresql+psycopg2://", 1)
+    return database_url
+
+
 def _default_database_url() -> str:
     local_data_root = Path(os.getenv("LOCALAPPDATA") or Path.home() / ".local" / "share")
     database_path = (
@@ -17,7 +25,7 @@ def _default_database_url() -> str:
 
 
 class Settings:
-    database_url: str = os.getenv("DATABASE_URL") or _default_database_url()
+    database_url: str = _normalize_database_url(os.getenv("DATABASE_URL") or _default_database_url())
     news_api_key: str | None = os.getenv("NEWS_API_KEY")
     news_api_url: str = os.getenv(
         "NEWS_API_URL",

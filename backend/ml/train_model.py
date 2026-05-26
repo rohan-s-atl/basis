@@ -428,7 +428,12 @@ def print_training_summary(result: TrainingResult) -> None:
 
 
 def result_to_dict(result: TrainingResult) -> dict[str, Any]:
-    return asdict(result)
+    payload = asdict(result)
+    payload["calibrated_accuracy"] = result.accuracy
+    payload["calibrated_roc_auc"] = result.roc_auc
+    payload["deployment_accuracy"] = result.accuracy
+    payload["accuracy_metric"] = "calibrated_accuracy"
+    return payload
 
 
 # ---------------------------------------------------------------------------

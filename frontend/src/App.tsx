@@ -1193,7 +1193,7 @@ function MLPage({ appData }: { appData: AppData }) {
             ) : appData.trainingHistory.slice(0, 8).map((run, index) => (
               <button key={run.id} onClick={() => go(`#/training/${index}`)} className="rounded-lg border border-quant-line bg-quant-panel2 p-3 text-left transition hover:border-quant-green/50">
                 <div className="mb-1 flex items-center justify-between">
-                  <strong className="text-quant-text">{(run.accuracy * 100).toFixed(1)}%</strong>
+                  <strong className="text-quant-text">{((run.deployment_accuracy ?? run.calibrated_accuracy ?? run.accuracy) * 100).toFixed(1)}%</strong>
                   <span className="text-xs font-bold uppercase text-quant-muted">{run.triggered_by}</span>
                 </div>
                 <p className="text-xs text-quant-muted">{run.dataset_size}s | AUC {run.roc_auc?.toFixed(3) ?? "n/a"}</p>
@@ -1360,7 +1360,7 @@ function TrainingRunPage({ history, index }: { history: TrainingRun[]; index: nu
         <p className="quant-eyebrow">Training Run</p>
         <h3 className="mb-4 text-2xl font-black text-quant-text">{new Date(run.trained_at).toLocaleString()}</h3>
         <div className="grid gap-3 md:grid-cols-4">
-          <DetailStat label="Accuracy" value={`${(run.accuracy * 100).toFixed(1)}%`} />
+          <DetailStat label="Deployed accuracy" value={`${((run.deployment_accuracy ?? run.calibrated_accuracy ?? run.accuracy) * 100).toFixed(1)}%`} />
           <DetailStat label="ROC AUC" value={run.roc_auc?.toFixed(3) ?? "n/a"} />
           <DetailStat label="Dataset" value={run.dataset_size.toString()} />
           <DetailStat label="Winner" value={run.winner_model} />

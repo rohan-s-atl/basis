@@ -247,6 +247,9 @@ export type TrainingRun = {
   train_size: number;
   test_size: number;
   accuracy: number;
+  calibrated_accuracy?: number;
+  deployment_accuracy?: number;
+  accuracy_metric?: string;
   roc_auc: number | null;
   brier_score_calibrated: number;
   brier_improvement: number;
@@ -277,6 +280,10 @@ export type ModelHealth = {
   status: "healthy" | "drift_detected" | "no_model";
   rolling_accuracy: { accuracy: number; samples: number; window: number } | null;
   peak_accuracy: number | null;
+  trained_accuracy?: number | null;
+  deployment_accuracy?: number | null;
+  accuracy_metric?: string;
+  trained_roc_auc?: number | null;
   drift_detected: boolean;
   confidence_drift: {
     drift_detected: boolean;

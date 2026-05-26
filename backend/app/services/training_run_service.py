@@ -34,7 +34,7 @@ def save_training_run(
         dataset_size=int(payload["dataset_size"]),
         train_size=int(payload["train_size"]),
         test_size=int(payload["test_size"]),
-        accuracy=float(payload["accuracy"]),
+        accuracy=_deployment_accuracy(payload),
         roc_auc=float(payload["roc_auc"]) if payload.get("roc_auc") is not None else None,
         brier_score_calibrated=float(calibration.get("brier_score_calibrated", 0.0)),
         brier_improvement=float(calibration.get("improvement", 0.0)),
@@ -103,6 +103,10 @@ def get_model_health(db: Session) -> dict[str, Any]:
             "status": "no_model",
             "rolling_accuracy": rolling,
             "peak_accuracy": None,
+            "trained_accuracy": None,
+            "deployment_accuracy": None,
+            "accuracy_metric": "calibrated_accuracy",
+            "trained_roc_auc": None,
             "drift_detected": False,
             "confidence_drift": confidence_drift,
             "last_trained_at": None,
@@ -122,6 +126,10 @@ def get_model_health(db: Session) -> dict[str, Any]:
         "status": "drift_detected" if drift else "healthy",
         "rolling_accuracy": rolling,
         "peak_accuracy": peak,
+        "trained_accuracy": peak,
+        "deployment_accuracy": peak,
+        "accuracy_metric": "calibrated_accuracy",
+        "trained_roc_auc": latest.roc_auc,
         "drift_detected": drift,
         "confidence_drift": confidence_drift,
         "last_trained_at": latest.trained_at.isoformat(),
@@ -264,6 +272,9 @@ def _run_to_dict(run: TrainingRun) -> dict[str, Any]:
         "train_size": run.train_size,
         "test_size": run.test_size,
         "accuracy": run.accuracy,
+        "calibrated_accuracy": run.accuracy,
+        "deployment_accuracy": run.accuracy,
+        "accuracy_metric": "calibrated_accuracy",
         "roc_auc": run.roc_auc,
         "brier_score_calibrated": run.brier_score_calibrated,
         "brier_improvement": run.brier_improvement,
@@ -276,3 +287,12 @@ def _run_to_dict(run: TrainingRun) -> dict[str, Any]:
         "top_features": json.loads(run.top_features),
         "label_balance": json.loads(run.label_balance),
     }
+
+
+def _deployment_accuracy(payload: dict[str, Any]) -> float:
+    value = payload.get("calibrated_accuracy")
+    if value is None:
+        value = payload.get("deployment_accuracy")
+    if value is None:
+        value = payload["accuracy"]
+    return float(value)

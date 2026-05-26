@@ -106,11 +106,11 @@ export function MLIntelligencePanel() {
                 </p>
               </div>
             )}
-            {health.peak_accuracy !== null && (
+            {(health.deployment_accuracy ?? health.peak_accuracy) !== null && (
               <div>
-                <p className="text-quant-muted">Peak accuracy</p>
+                <p className="text-quant-muted">Deployed accuracy</p>
                 <p className="mt-0.5 font-black text-quant-text">
-                  {(health.peak_accuracy * 100).toFixed(1)}%
+                  {((health.deployment_accuracy ?? health.peak_accuracy ?? 0) * 100).toFixed(1)}%
                 </p>
               </div>
             )}
@@ -285,7 +285,7 @@ export function MLIntelligencePanel() {
                   {run.triggered_by}
                 </span>
                 <span className="shrink-0 font-black text-quant-text">
-                  {(run.accuracy * 100).toFixed(1)}%
+                  {((run.deployment_accuracy ?? run.calibrated_accuracy ?? run.accuracy) * 100).toFixed(1)}%
                 </span>
                 <span className="shrink-0 text-quant-muted">
                   AUC {run.roc_auc !== null ? run.roc_auc.toFixed(3) : "—"}

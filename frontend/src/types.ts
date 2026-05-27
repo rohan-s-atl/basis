@@ -242,6 +242,16 @@ export type LabelBalance = {
   negative_count: number;
 };
 
+export type RawReturnDirection = {
+  samples: number;
+  up: number;
+  down: number;
+  flat: number;
+  up_count: number;
+  down_count: number;
+  flat_count: number;
+};
+
 export type TrainingRun = {
   id: string;
   trained_at: string;
@@ -317,6 +327,7 @@ export type ModelEvaluation = {
     accuracy: number;
   };
   baselines: Record<string, EvaluationMetric>;
+  raw_return_direction?: RawReturnDirection;
   by_asset: Record<string, EvaluationMetric>;
   by_event_type: Record<string, EvaluationMetric>;
   by_horizon: Record<string, EvaluationMetric>;

@@ -56,10 +56,11 @@ def upsert_signal_backtest(
     return record
 
 
-def list_signal_backtests(db: Session, limit: int = 500) -> list[SignalBacktest]:
-    return (
+def list_signal_backtests(db: Session, limit: int | None = None) -> list[SignalBacktest]:
+    query = (
         db.query(SignalBacktest)
         .order_by(SignalBacktest.evaluated_at.desc())
-        .limit(limit)
-        .all()
     )
+    if limit is not None:
+        query = query.limit(limit)
+    return query.all()

@@ -5,20 +5,20 @@ export default {
     extend: {
       colors: {
         quant: {
-          bg: "#0B0F14",
-          panel: "#121821",
-          panel2: "#151C27",
-          green: "#00E676",
-          blue: "#2979FF",
-          red: "#FF5252",
-          yellow: "#FFD740",
-          text: "#E6EDF3",
-          muted: "#8B949E",
-          line: "rgba(139,148,158,0.22)"
+          bg: "#0C1117",
+          panel: "#111820",
+          panel2: "#151D27",
+          green: "#14B8A6",
+          blue: "#4F8EF7",
+          red: "#F87171",
+          yellow: "#FBBF24",
+          text: "#E8EEF6",
+          muted: "#9AA6B2",
+          line: "rgba(154,166,178,0.22)"
         }
       },
       boxShadow: {
-        panel: "0 18px 60px rgba(0,0,0,0.34)"
+        panel: "0 12px 34px rgba(0,0,0,0.24)"
       }
     }
   },

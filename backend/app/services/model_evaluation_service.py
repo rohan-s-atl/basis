@@ -40,6 +40,7 @@ def get_model_evaluation(db: Session, *, limit: int = 50_000) -> dict[str, Any]:
         "high_confidence": _performance([row for row in rows if row.confidence >= 0.7]),
         "benchmark_relative": _benchmark_relative_performance(rows),
         "baselines": _baseline_comparison(rows),
+        "raw_return_direction": _raw_return_direction(rows),
         "by_asset": _group_performance(rows, "asset", limit=10),
         "by_event_type": _group_performance(rows, "event_type"),
         "by_horizon": _group_performance(rows, "horizon_days"),
@@ -167,6 +168,33 @@ def _baseline_comparison(rows: list[EvaluationRow]) -> dict[str, dict[str, float
             rows,
             lambda row: "up" if row.spy_trend >= 0 else "down",
         ),
+    }
+
+
+def _raw_return_direction(rows: list[EvaluationRow]) -> dict[str, float | int]:
+    if not rows:
+        return {
+            "samples": 0,
+            "up": 0.0,
+            "down": 0.0,
+            "flat": 0.0,
+            "up_count": 0,
+            "down_count": 0,
+            "flat_count": 0,
+        }
+
+    up = sum(1 for row in rows if row.raw_return > 0)
+    down = sum(1 for row in rows if row.raw_return < 0)
+    flat = len(rows) - up - down
+    total = len(rows)
+    return {
+        "samples": total,
+        "up": round(up / total, 4),
+        "down": round(down / total, 4),
+        "flat": round(flat / total, 4),
+        "up_count": up,
+        "down_count": down,
+        "flat_count": flat,
     }
 
 

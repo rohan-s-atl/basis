@@ -177,7 +177,7 @@ export function MLIntelligencePanel() {
 
           <div className="mb-3 rounded-md border border-quant-line bg-quant-bg/50 p-2">
             <div className="mb-2 flex items-center justify-between text-[0.65rem] font-bold uppercase text-quant-muted">
-              <span>Model vs baselines</span>
+              <span>Directional baselines</span>
               <span>accuracy</span>
             </div>
             <div className="grid gap-1.5">
@@ -186,6 +186,20 @@ export function MLIntelligencePanel() {
               ))}
             </div>
           </div>
+
+          {evaluation.raw_return_direction && (
+            <div className="mb-3 rounded-md border border-quant-line bg-quant-bg/50 p-2">
+              <div className="mb-2 flex items-center justify-between text-[0.65rem] font-bold uppercase text-quant-muted">
+                <span>Raw return direction</span>
+                <span>{evaluation.raw_return_direction.samples} samples</span>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <DirectionStat label="Up" value={evaluation.raw_return_direction.up} count={evaluation.raw_return_direction.up_count} tone="green" />
+                <DirectionStat label="Down" value={evaluation.raw_return_direction.down} count={evaluation.raw_return_direction.down_count} tone="red" />
+                <DirectionStat label="Flat" value={evaluation.raw_return_direction.flat} count={evaluation.raw_return_direction.flat_count} tone="yellow" />
+              </div>
+            </div>
+          )}
 
           <div className="mb-3 grid grid-cols-2 gap-2">
             <MiniGroup title="By horizon" rows={evaluation.by_horizon} />
@@ -389,6 +403,17 @@ function MiniGroup({ title, rows }: { title: string; rows: Record<string, Evalua
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function DirectionStat({ label, value, count, tone }: { label: string; value: number; count: number; tone: "green" | "red" | "yellow" }) {
+  const color = tone === "green" ? "text-quant-green" : tone === "red" ? "text-quant-red" : "text-quant-yellow";
+  return (
+    <div className="rounded-md border border-quant-line bg-quant-panel/60 p-2">
+      <p className="text-[0.6rem] font-bold uppercase text-quant-muted">{label}</p>
+      <strong className={`text-sm font-black ${color}`}>{(value * 100).toFixed(1)}%</strong>
+      <p className="text-[0.6rem] text-quant-muted">{count} samples</p>
     </div>
   );
 }

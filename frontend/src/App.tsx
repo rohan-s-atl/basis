@@ -94,14 +94,21 @@ type AppData = {
   validation: TrainingDataValidation | null;
 };
 
+type SearchResult = {
+  kind: "Event" | "Asset" | "Forecast";
+  title: string;
+  detail: string;
+  route: string;
+};
+
 const navItems = [
   { route: "#/", label: "Overview", icon: Activity },
   { route: "#/events", label: "Events", icon: FileText },
   { route: "#/assets", label: "Assets", icon: BriefcaseBusiness },
   { route: "#/predictions", label: "Predictions", icon: Target },
-  { route: "#/portfolio", label: "Portfolio", icon: LineChart },
-  { route: "#/ml", label: "ML Lab", icon: BrainCircuit },
-  { route: "#/data", label: "Data Health", icon: Database },
+  { route: "#/portfolio", label: "My Portfolio", icon: LineChart },
+  { route: "#/ml", label: "Model", icon: BrainCircuit },
+  { route: "#/data", label: "System Health", icon: Database },
 ];
 
 function parseRoute(): Route {
@@ -141,6 +148,8 @@ function App() {
   const [events, setEvents] = useState<EventRecord[]>([]);
   const [quotes, setQuotes] = useState<Record<string, PriceQuote>>({});
   const [query, setQuery] = useState("");
+  const [searchFocused, setSearchFocused] = useState(false);
+  const [holdingsText, setHoldingsText] = useState(() => window.localStorage.getItem("basis_holdings") ?? "AAPL, MSFT, QQQ, GLD");
   const [severityFilter, setSeverityFilter] = useState("all");
   const [directionFilter, setDirectionFilter] = useState("all");
   const [eventTypeFilter, setEventTypeFilter] = useState("all");
@@ -201,6 +210,12 @@ function App() {
   const alerts = useMemo(() => buildAlertRules(filteredEvents), [filteredEvents]);
   const clusters = useMemo(() => clusterEvents(filteredEvents), [filteredEvents]);
   const nextAction = useMemo(() => getNextAction(events, appData), [appData, events]);
+  const holdingSymbols = useMemo(() => parseSymbolList(holdingsText), [holdingsText]);
+  const searchResults = useMemo(() => buildSearchResults(query, events, assetRows, appData.predictions), [appData.predictions, assetRows, events, query]);
+
+  useEffect(() => {
+    window.localStorage.setItem("basis_holdings", holdingsText);
+  }, [holdingsText]);
 
   useEffect(() => {
     if (assetRows.length === 0) return;
@@ -288,7 +303,6 @@ function App() {
 
   return (
     <main className="min-h-screen bg-quant-bg text-quant-text">
-      <div className="pointer-events-none fixed inset-0 bg-[linear-gradient(rgba(139,148,158,0.04)_1px,transparent_1px),linear-gradient(90deg,rgba(139,148,158,0.04)_1px,transparent_1px)] bg-[size:48px_48px]" />
       <div className="relative z-10 flex min-h-screen">
         <aside className="scrollbar-quant sticky top-0 hidden h-screen w-64 shrink-0 overflow-y-auto border-r border-quant-line bg-quant-bg/92 px-4 py-5 backdrop-blur-xl lg:block">
           <button onClick={() => go("#/")} className="mb-7 flex w-full items-center gap-3 text-left">
@@ -354,7 +368,7 @@ function App() {
               className="rounded-lg border border-quant-line bg-quant-panel2 p-3 text-left transition hover:border-quant-green/50"
             >
               <div className="mb-3 flex items-center justify-between gap-2">
-                <p className="quant-eyebrow">Model Core</p>
+                <p className="quant-eyebrow">Model</p>
                 <span className={appData.modelHealth?.drift_detected ? "text-[0.65rem] font-black uppercase text-quant-red" : "text-[0.65rem] font-black uppercase text-quant-green"}>
                   {appData.modelHealth?.drift_detected ? "Drift" : "Stable"}
                 </span>
@@ -415,9 +429,14 @@ function App() {
                   <input
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
+                    onFocus={() => setSearchFocused(true)}
+                    onBlur={() => window.setTimeout(() => setSearchFocused(false), 120)}
                     placeholder="Search events, assets, sectors"
                     className="quant-input h-9 pl-9"
                   />
+                  {searchFocused && query.trim() && (
+                    <SearchResults results={searchResults} query={query} />
+                  )}
                 </label>
                 <button className="quant-button" onClick={refresh} disabled={isRefreshing}>
                   <RefreshCw size={15} className={isRefreshing ? "animate-spin" : ""} />
@@ -441,9 +460,14 @@ function App() {
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
+                onFocus={() => setSearchFocused(true)}
+                onBlur={() => window.setTimeout(() => setSearchFocused(false), 120)}
                 placeholder="Search events, assets, sectors"
                 className="quant-input h-9 pl-9"
               />
+              {searchFocused && query.trim() && (
+                <SearchResults results={searchResults} query={query} />
+              )}
             </label>
           </header>
 
@@ -469,6 +493,9 @@ function App() {
               alerts={alerts}
               clusters={clusters}
               appData={appData}
+              holdingsText={holdingsText}
+              holdingSymbols={holdingSymbols}
+              onHoldingsChange={setHoldingsText}
               isLoading={isLoading}
               filters={{
                 severityFilter,
@@ -499,6 +526,9 @@ function PageRenderer({
   alerts,
   clusters,
   appData,
+  holdingsText,
+  holdingSymbols,
+  onHoldingsChange,
   isLoading,
   filters,
 }: {
@@ -510,6 +540,9 @@ function PageRenderer({
   alerts: ReturnType<typeof buildAlertRules>;
   clusters: ReturnType<typeof clusterEvents>;
   appData: AppData;
+  holdingsText: string;
+  holdingSymbols: string[];
+  onHoldingsChange: (value: string) => void;
   isLoading: boolean;
   filters: {
     severityFilter: string;
@@ -530,7 +563,7 @@ function PageRenderer({
   if (route.name === "asset") return <AssetDetailPage symbol={route.symbol} rows={assetRows} quotes={quotes} events={allEvents} predictions={appData.predictions} backtest={appData.backtest} />;
   if (route.name === "predictions") return <PredictionsPage summary={appData.predictions} />;
   if (route.name === "prediction") return <PredictionDetailPage summary={appData.predictions} index={route.index} marketRegime={appData.marketRegime} allPredictions={appData.predictions} />;
-  if (route.name === "portfolio") return <PortfolioPage appData={appData} />;
+  if (route.name === "portfolio") return <PortfolioPage appData={appData} events={allEvents} quotes={quotes} holdingsText={holdingsText} holdingSymbols={holdingSymbols} onHoldingsChange={onHoldingsChange} />;
   if (route.name === "ml") return <MLPage appData={appData} />;
   if (route.name === "regime") return <RegimePage regime={appData.marketRegime} />;
   if (route.name === "training") return <TrainingRunPage history={appData.trainingHistory} index={route.index} />;
@@ -1098,7 +1131,21 @@ function PredictionDetailPage({ summary, index, marketRegime, allPredictions }: 
   );
 }
 
-function PortfolioPage({ appData }: { appData: AppData }) {
+function PortfolioPage({
+  appData,
+  events,
+  quotes,
+  holdingsText,
+  holdingSymbols,
+  onHoldingsChange,
+}: {
+  appData: AppData;
+  events: EventRecord[];
+  quotes: Record<string, PriceQuote>;
+  holdingsText: string;
+  holdingSymbols: string[];
+  onHoldingsChange: (value: string) => void;
+}) {
   const summary = appData.backtest;
   const portfolio = appData.portfolio;
   const earlyModel = (appData.trainingStats?.num_samples ?? 0) < 300;
@@ -1123,6 +1170,15 @@ function PortfolioPage({ appData }: { appData: AppData }) {
         <MetricCard label="Win rate" value={portfolio ? hasActionableSignals ? `${portfolio.win_rate_pct}%` : "N/A" : "--"} icon={Target} onClick={() => go("#/portfolio")} />
         <MetricCard label="Signals" value={summary?.total_signals.toString() ?? "--"} icon={FileText} onClick={() => go("#/portfolio")} />
       </div>
+      <HoldingsWorkspace
+        events={events}
+        predictions={appData.predictions}
+        quotes={quotes}
+        holdingsText={holdingsText}
+        holdingSymbols={holdingSymbols}
+        onHoldingsChange={onHoldingsChange}
+        regime={appData.marketRegime}
+      />
       <div className="grid gap-5 2xl:grid-cols-[minmax(0,1.4fr)_minmax(420px,0.8fr)]">
         <BacktestPanel />
         <aside className="grid content-start gap-4">
@@ -1260,7 +1316,7 @@ function DataHealthPage({ appData, events }: { appData: AppData; events: EventRe
   return (
     <div className="grid gap-5 2xl:grid-cols-[minmax(0,1fr)_minmax(460px,0.9fr)]">
       <section className="quant-panel p-5">
-        <p className="quant-eyebrow">Data Health</p>
+        <p className="quant-eyebrow">System Health</p>
         <h3 className="mb-4 text-xl font-black text-quant-text">Pipeline readiness</h3>
         <div className="grid gap-3 md:grid-cols-3">
           <DetailStat label="Events" value={events.length.toString()} />
@@ -1268,10 +1324,10 @@ function DataHealthPage({ appData, events }: { appData: AppData; events: EventRe
           <DetailStat label="Features" value={stats?.feature_count.toString() ?? "--"} />
         </div>
         <div className="mt-5 rounded-lg border border-quant-line bg-quant-panel2 p-4">
-          <p className="quant-eyebrow mb-2">Class balance</p>
+          <p className="quant-eyebrow mb-2">Signal label balance</p>
           <div className="grid gap-2 md:grid-cols-2">
-            <FeatureBar label="Positive" value={stats?.class_distribution.positive ?? 0} />
-            <FeatureBar label="Negative" value={stats?.class_distribution.negative ?? 0} />
+            <FeatureBar label="Correct" value={stats?.class_distribution.positive ?? 0} />
+            <FeatureBar label="Incorrect" value={stats?.class_distribution.negative ?? 0} />
           </div>
         </div>
         <div className="mt-5 rounded-lg border border-quant-line bg-quant-panel2 p-4">
@@ -1308,8 +1364,8 @@ function DataHealthPage({ appData, events }: { appData: AppData; events: EventRe
         </p>
         <div className="mb-4 grid gap-3 md:grid-cols-3">
           <DetailStat label="Status" value={issues.length ? "Warning" : "Clean"} />
-          <DetailStat label="Positive" value={`${stats ? Math.round(stats.class_distribution.positive * 100) : 0}%`} />
-          <DetailStat label="Negative" value={`${stats ? Math.round(stats.class_distribution.negative * 100) : 0}%`} />
+          <DetailStat label="Correct labels" value={`${stats ? Math.round(stats.class_distribution.positive * 100) : 0}%`} />
+          <DetailStat label="Incorrect labels" value={`${stats ? Math.round(stats.class_distribution.negative * 100) : 0}%`} />
         </div>
         <div className="grid gap-3">
           {issues.length ? issues.map((issue) => <ValidationIssueCard key={issue} issue={issue} />) : <div className="rounded-lg border border-quant-green/35 bg-quant-green/8 p-3 text-sm font-bold text-quant-green">No validation issues reported.</div>}
@@ -1354,11 +1410,11 @@ function RegimePage({ regime }: { regime: MarketRegime | null }) {
 
 function TrainingRunPage({ history, index }: { history: TrainingRun[]; index: number }) {
   const run = history[index];
-  if (!run) return <EmptyState title="Training run not found" action="Back to ML Lab" onClick={() => go("#/ml")} />;
+  if (!run) return <EmptyState title="Training run not found" action="Back to model" onClick={() => go("#/ml")} />;
   return (
     <div className="grid gap-5 xl:grid-cols-[1fr_420px]">
       <section className="quant-panel p-5">
-        <button onClick={() => go("#/ml")} className="mb-4 inline-flex items-center gap-2 text-sm font-bold text-quant-muted hover:text-quant-text"><ArrowLeft size={14} /> ML Lab</button>
+        <button onClick={() => go("#/ml")} className="mb-4 inline-flex items-center gap-2 text-sm font-bold text-quant-muted hover:text-quant-text"><ArrowLeft size={14} /> Model</button>
         <p className="quant-eyebrow">Training Run</p>
         <h3 className="mb-4 text-2xl font-black text-quant-text">{new Date(run.trained_at).toLocaleString()}</h3>
         <div className="grid gap-3 md:grid-cols-4">
@@ -1380,7 +1436,7 @@ function TrainingRunPage({ history, index }: { history: TrainingRun[]; index: nu
           <DetailStat label="Train / test" value={`${run.train_size} / ${run.test_size}`} />
           <DetailStat label="Walk-forward" value={`${(run.walk_forward_mean * 100).toFixed(1)}% ± ${(run.walk_forward_std * 100).toFixed(1)}%`} />
           <DetailStat label="Brier improvement" value={run.brier_improvement.toFixed(4)} />
-          <DetailStat label="Label balance" value={`${run.label_balance.positive_count}+ / ${run.label_balance.negative_count}-`} />
+          <DetailStat label="Label balance" value={`${run.label_balance.positive_count} correct / ${run.label_balance.negative_count} incorrect`} />
         </div>
       </section>
     </div>
@@ -1471,7 +1527,7 @@ function getNextAction(events: EventRecord[], appData: AppData) {
   if (events.length === 0) return { label: "Open events", route: "#/events", detail: "No event feed loaded yet." };
   if (samples < 300) return { label: "Open data health", route: "#/data", detail: `${samples}/300 labeled samples collected.` };
   if (issues > 0) return { label: "Review validation", route: "#/data", detail: `${issues} validation warning${issues === 1 ? "" : "s"} to review.` };
-  if (appData.modelHealth?.drift_detected) return { label: "Open ML Lab", route: "#/ml", detail: "Model drift is currently flagged." };
+  if (appData.modelHealth?.drift_detected) return { label: "Open model", route: "#/ml", detail: "Model drift is currently flagged." };
   return { label: "Open portfolio", route: "#/portfolio", detail: "Pipeline is ready for performance review." };
 }
 
@@ -1509,11 +1565,11 @@ function breadcrumbItems(route: Route): Array<{ label: string; href?: string }> 
   if (route.name === "event") return [{ label: "Events", href: "#/events" }, { label: "Detail" }];
   if (route.name === "asset") return [{ label: "Assets", href: "#/assets" }, { label: route.symbol }];
   if (route.name === "prediction") return [{ label: "Predictions", href: "#/predictions" }, { label: "Detail" }];
-  if (route.name === "regime") return [{ label: "ML Lab", href: "#/ml" }, { label: "Regime" }];
-  if (route.name === "training") return [{ label: "ML Lab", href: "#/ml" }, { label: "Training run" }];
+  if (route.name === "regime") return [{ label: "Model", href: "#/ml" }, { label: "Regime" }];
+  if (route.name === "training") return [{ label: "Model", href: "#/ml" }, { label: "Training run" }];
   if (route.name === "signal") return [{ label: "Portfolio", href: "#/portfolio" }, { label: "Signal" }];
-  if (route.name === "ml") return [{ label: "ML Lab" }];
-  if (route.name === "data") return [{ label: "Data Health" }];
+  if (route.name === "ml") return [{ label: "Model" }];
+  if (route.name === "data") return [{ label: "System Health" }];
   return [{ label: pageTitle(route) }];
 }
 
@@ -1536,6 +1592,146 @@ function InlineEmpty({ title, description }: { title: string; description: strin
     <div className="col-span-full rounded-lg border border-dashed border-quant-line bg-quant-bg/45 p-5">
       <p className="mb-1 font-black text-quant-text">{title}</p>
       <p className="text-sm text-quant-muted">{description}</p>
+    </div>
+  );
+}
+
+function SearchResults({ results, query }: { results: SearchResult[]; query: string }) {
+  return (
+    <div className="absolute right-0 top-11 z-40 w-[min(34rem,calc(100vw-2rem))] rounded-lg border border-quant-line bg-quant-panel shadow-panel">
+      <div className="border-b border-quant-line px-3 py-2 text-xs font-semibold text-quant-muted">
+        Search results for "{query.trim()}"
+      </div>
+      <div className="scrollbar-quant max-h-96 overflow-auto p-2">
+        {results.length === 0 ? (
+          <p className="px-2 py-4 text-sm text-quant-muted">No matching events, assets, or forecasts.</p>
+        ) : results.map((result) => (
+          <button
+            key={`${result.route}-${result.title}`}
+            type="button"
+            onClick={() => go(result.route)}
+            className="block w-full rounded-md px-3 py-2 text-left transition hover:bg-quant-panel2"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm font-bold text-quant-text">{result.title}</span>
+              <span className="shrink-0 text-[0.62rem] font-bold uppercase text-quant-muted">{result.kind}</span>
+            </div>
+            <p className="mt-0.5 line-clamp-1 text-xs text-quant-muted">{result.detail}</p>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function HoldingsWorkspace({
+  events,
+  predictions,
+  quotes,
+  holdingsText,
+  holdingSymbols,
+  onHoldingsChange,
+  regime,
+}: {
+  events: EventRecord[];
+  predictions: PredictionSummary | null;
+  quotes: Record<string, PriceQuote>;
+  holdingsText: string;
+  holdingSymbols: string[];
+  onHoldingsChange: (value: string) => void;
+  regime: MarketRegime | null;
+}) {
+  const rows = holdingSymbols.map((symbol) => {
+    const symbolEvents = events.filter((event) => getLinkedAssets(event).some((asset) => asset.symbol === symbol));
+    const symbolPredictions = predictionsForSymbols(predictions, [symbol]);
+    const negativeEvents = symbolEvents.filter((event) => event.impact_direction === "negative").length;
+    const positiveEvents = symbolEvents.filter((event) => event.impact_direction === "positive").length;
+    const strongestPrediction = symbolPredictions
+      .map(({ prediction, index }) => ({ prediction, index }))
+      .sort((a, b) => b.prediction.ranking_score - a.prediction.ranking_score)[0];
+    const risk = Math.min(100, negativeEvents * 24 + symbolEvents.length * 8 + (strongestPrediction ? strongestPrediction.prediction.probability * 18 : 0));
+    return {
+      symbol,
+      events: symbolEvents,
+      predictions: symbolPredictions,
+      quote: quotes[symbol],
+      net: positiveEvents > negativeEvents ? "positive" : negativeEvents > positiveEvents ? "negative" : "neutral",
+      risk,
+      strongestPrediction,
+    };
+  });
+  const portfolioRisk = rows.length ? Math.round(rows.reduce((sum, row) => sum + row.risk, 0) / rows.length) : 0;
+  const covered = rows.filter((row) => row.events.length > 0 || row.predictions.length > 0).length;
+
+  return (
+    <section className="quant-panel p-4">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="quant-eyebrow">Your holdings</p>
+          <h3 className="text-xl font-black text-quant-text">Portfolio briefing</h3>
+          <p className="mt-1 text-sm text-quant-muted">Enter symbols you own to see related events, forecasts, and current market context.</p>
+        </div>
+        <div className="grid grid-cols-3 gap-2 text-right">
+          <DetailStat label="Coverage" value={`${covered}/${holdingSymbols.length || 0}`} />
+          <DetailStat label="Risk score" value={holdingSymbols.length ? portfolioRisk.toString() : "--"} />
+          <DetailStat label="Regime" value={regime ? regimeName(regime.market_regime_encoded) : "--"} />
+        </div>
+      </div>
+      <div className="mb-4 grid gap-2 md:grid-cols-[1fr_auto]">
+        <input
+          value={holdingsText}
+          onChange={(event) => onHoldingsChange(event.target.value)}
+          className="quant-input"
+          placeholder="AAPL, MSFT, QQQ, GLD"
+        />
+        <button className="quant-button" onClick={() => onHoldingsChange(holdingsText)}>
+          Analyze holdings
+        </button>
+      </div>
+      <div className="grid gap-3 xl:grid-cols-2">
+        {rows.length === 0 ? (
+          <InlineEmpty title="Add holdings" description="Type a few ticker symbols above to build a personalized portfolio view." />
+        ) : rows.map((row) => (
+          <button
+            key={row.symbol}
+            type="button"
+            onClick={() => go(`#/assets/${row.symbol}`)}
+            className="rounded-lg border border-quant-line bg-quant-panel2 p-3 text-left transition hover:border-quant-blue/50"
+          >
+            <div className="mb-2 flex items-start justify-between gap-3">
+              <div>
+                <strong className="text-lg font-black text-quant-text">{row.symbol}</strong>
+                <p className="text-xs text-quant-muted">
+                  {row.events.length} event{row.events.length === 1 ? "" : "s"} | {row.predictions.length} forecast{row.predictions.length === 1 ? "" : "s"}
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-xs font-bold uppercase text-quant-muted">Risk</p>
+                <strong className={row.risk >= 55 ? "text-quant-red" : row.risk >= 30 ? "text-quant-yellow" : "text-quant-green"}>{Math.round(row.risk)}</strong>
+              </div>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-3">
+              <MiniHoldingStat label="Price" value={typeof row.quote?.price === "number" ? `$${row.quote.price.toFixed(2)}` : "--"} />
+              <MiniHoldingStat label="Net macro" value={formatLabel(row.net)} tone={row.net} />
+              <MiniHoldingStat
+                label="Top forecast"
+                value={row.strongestPrediction ? `${Math.round(row.strongestPrediction.prediction.probability * 100)}% ${row.strongestPrediction.prediction.impact_direction}` : "--"}
+                tone={row.strongestPrediction?.prediction.impact_direction}
+              />
+            </div>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function MiniHoldingStat({ label, value, tone }: { label: string; value: string; tone?: string }) {
+  const toneClass = tone === "positive" ? "text-quant-green" : tone === "negative" ? "text-quant-red" : "text-quant-text";
+  return (
+    <div className="rounded-md border border-quant-line bg-quant-bg/50 p-2">
+      <p className="text-[0.6rem] font-bold uppercase text-quant-muted">{label}</p>
+      <strong className={`text-xs font-black capitalize ${toneClass}`}>{value}</strong>
     </div>
   );
 }
@@ -1718,6 +1914,72 @@ function predictionsForSymbols(summary: PredictionSummary | null, symbols: strin
     .filter(({ prediction }) => symbolSet.has(prediction.symbol));
 }
 
+function parseSymbolList(value: string): string[] {
+  return Array.from(
+    new Set(
+      value
+        .split(/[,\s]+/)
+        .map((symbol) => symbol.trim().toUpperCase())
+        .filter((symbol) => /^[A-Z][A-Z0-9.-]{0,9}$/.test(symbol))
+    )
+  );
+}
+
+function buildSearchResults(
+  query: string,
+  events: EventRecord[],
+  assets: AssetImpactRow[],
+  predictions: PredictionSummary | null
+): SearchResult[] {
+  const tokens = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return [];
+
+  function matches(value: string) {
+    const normalized = value.toLowerCase();
+    return tokens.every((token) => normalized.includes(token));
+  }
+
+  const eventResults = events
+    .filter((event) => matches([
+      event.title,
+      event.description,
+      event.event_type,
+      event.severity ?? "",
+      ...event.affected_sectors,
+      ...getLinkedAssets(event).map((asset) => asset.symbol),
+    ].join(" ")))
+    .slice(0, 4)
+    .map((event) => ({
+      kind: "Event" as const,
+      title: event.title,
+      detail: `${formatLabel(event.event_type)} | ${formatLabel(event.impact_direction)} | ${(event.mapped_assets ?? []).join(", ") || "No mapped assets"}`,
+      route: `#/events/${encodeURIComponent(eventKey(event))}`,
+    }));
+
+  const assetResults = assets
+    .filter((asset) => matches(`${asset.symbol} ${asset.eventType} ${asset.direction}`))
+    .slice(0, 4)
+    .map((asset) => ({
+      kind: "Asset" as const,
+      title: asset.symbol,
+      detail: `${formatLabel(asset.eventType)} | ${formatLabel(asset.direction)} macro impact`,
+      route: `#/assets/${asset.symbol}`,
+    }));
+
+  const forecastResults = (predictions?.predictions ?? [])
+    .map((prediction, index) => ({ prediction, index }))
+    .filter(({ prediction }) => matches(`${prediction.symbol} ${prediction.title} ${prediction.event_type} ${prediction.impact_direction}`))
+    .slice(0, 4)
+    .map(({ prediction, index }) => ({
+      kind: "Forecast" as const,
+      title: `${prediction.symbol} ${formatLabel(prediction.impact_direction)}`,
+      detail: `${Math.round(prediction.probability * 100)}% probability | ${formatLabel(prediction.event_type)} | ${prediction.horizon}`,
+      route: `#/predictions/${index}`,
+    }));
+
+  return [...assetResults, ...forecastResults, ...eventResults].slice(0, 10);
+}
+
 function uniqueValues(values: string[]) {
   return Array.from(new Set(values.filter(Boolean))).sort();
 }
@@ -1865,7 +2127,7 @@ function featureExplanation(label: string): string {
   if (normalized.includes("volatility") || normalized.includes("vix")) return "Market volatility context at prediction time.";
   if (normalized.includes("asset")) return "Encoded asset or asset-class identity used by the model.";
   if (normalized.includes("price")) return "Market price context when the signal was generated.";
-  if (normalized.includes("positive") || normalized.includes("negative")) return "Share of labeled samples in this outcome class.";
+  if (normalized.includes("correct") || normalized.includes("incorrect") || normalized.includes("positive") || normalized.includes("negative")) return "Share of labeled samples in this outcome class.";
   return "Model feature contribution or dataset metric. Higher magnitude means this item mattered more in this view.";
 }
 
@@ -1974,15 +2236,15 @@ function pageTitle(route: Route): string {
   if (route.name === "events") return "Events";
   if (route.name === "assets") return "Assets";
   if (route.name === "predictions") return "Predictions";
-  if (route.name === "portfolio") return "Portfolio";
-  if (route.name === "ml") return "ML Lab";
+  if (route.name === "portfolio") return "My Portfolio";
+  if (route.name === "ml") return "Model";
   if (route.name === "regime") return "Market Regime";
   if (route.name === "training") return "Training Run";
   if (route.name === "signal") return "Signal Detail";
   if (route.name === "breadth") return "Breadth";
   if (route.name === "alerts") return "Alerts";
   if (route.name === "accuracy") return "Accuracy";
-  if (route.name === "data") return "Data Health";
+  if (route.name === "data") return "System Health";
   return "Overview";
 }
 

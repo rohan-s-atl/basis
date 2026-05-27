@@ -80,7 +80,7 @@ def run_backtest(db: Session, limit: int = 100) -> dict:
                 )
             )
 
-    return build_backtest_summary(evaluated or list_signal_backtests(db), skipped=skipped)
+    return build_backtest_summary(list_signal_backtests(db), skipped=skipped)
 
 
 def get_backtest_summary(db: Session) -> dict:
@@ -88,7 +88,7 @@ def get_backtest_summary(db: Session) -> dict:
 
 
 def get_portfolio_simulation(db: Session) -> dict:
-    records = list_signal_backtests(db, limit=500)
+    records = list_signal_backtests(db)
     actionable_records = [record for record in records if _is_actionable(record)]
     ordered = sorted(
         actionable_records,

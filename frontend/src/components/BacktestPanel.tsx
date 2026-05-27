@@ -34,6 +34,9 @@ export function BacktestPanel() {
     }
   }
 
+  const actionableSignals = summary?.actionable_signals ?? portfolio?.actionable_signals ?? 0;
+  const hasActionableSignals = actionableSignals > 0;
+
   return (
     <section>
       <div className="mb-3 flex items-center justify-between gap-3">
@@ -64,19 +67,27 @@ export function BacktestPanel() {
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div>
                   <p className="quant-eyebrow">Portfolio simulation</p>
-                  <h3 className="text-sm font-black text-quant-text">Signal curve vs SPY</h3>
-                  <p className="mt-1 text-xs text-quant-muted">Compounded signal return compared with the same-window SPY benchmark.</p>
+                  <h3 className="text-sm font-black text-quant-text">{hasActionableSignals ? "Signal curve vs SPY" : "Awaiting actionable signals"}</h3>
+                  <p className="mt-1 text-xs text-quant-muted">
+                    {hasActionableSignals
+                      ? "Compounded actionable signal return compared with the same-window SPY benchmark."
+                      : "Signals are being tracked, but none have moved enough to enter the strategy simulation yet."}
+                  </p>
                 </div>
-                <span className={`text-sm font-black ${portfolio.excess_return_pct >= 0 ? "text-quant-green" : "text-quant-red"}`}>
-                  {portfolio.excess_return_pct >= 0 ? "+" : ""}{portfolio.excess_return_pct}% excess
-                </span>
+                {hasActionableSignals ? (
+                  <span className={`text-sm font-black ${portfolio.excess_return_pct >= 0 ? "text-quant-green" : "text-quant-red"}`}>
+                    {portfolio.excess_return_pct >= 0 ? "+" : ""}{portfolio.excess_return_pct}% excess
+                  </span>
+                ) : (
+                  <span className="text-sm font-black text-quant-yellow">{portfolio.signals} pending</span>
+                )}
               </div>
-              <PortfolioCurve simulation={portfolio} />
+              {hasActionableSignals ? <PortfolioCurve simulation={portfolio} /> : <PendingPortfolioCurve simulation={portfolio} />}
               <div className="mt-2 grid grid-cols-4 gap-2">
-                <SmallStat label="Return" value={`${portfolio.total_return_pct >= 0 ? "+" : ""}${portfolio.total_return_pct}%`} />
-                <SmallStat label="SPY" value={`${portfolio.benchmark_return_pct >= 0 ? "+" : ""}${portfolio.benchmark_return_pct}%`} />
-                <SmallStat label="Win rate" value={`${portfolio.win_rate_pct}%`} />
-                <SmallStat label="Risk/signal" value={`${portfolio.allocation_pct}%`} />
+                <SmallStat label="Return" value={hasActionableSignals ? `${portfolio.total_return_pct >= 0 ? "+" : ""}${portfolio.total_return_pct}%` : "Pending"} />
+                <SmallStat label="SPY" value={hasActionableSignals ? `${portfolio.benchmark_return_pct >= 0 ? "+" : ""}${portfolio.benchmark_return_pct}%` : "Pending"} />
+                <SmallStat label="Win rate" value={hasActionableSignals ? `${portfolio.win_rate_pct}%` : "N/A"} />
+                <SmallStat label="Risk/signal" value={hasActionableSignals ? `${portfolio.allocation_pct}%` : "N/A"} />
               </div>
             </div>
           )}
@@ -216,6 +227,28 @@ function PortfolioCurve({ simulation }: { simulation: PortfolioSimulation }) {
         <span>Signals: {simulation.signals}</span>
         <span className="inline-flex items-center gap-1 text-quant-green"><span className="h-1.5 w-5 rounded-full bg-quant-green" /> Strategy</span>
         <span className="inline-flex items-center gap-1"><span className="h-1.5 w-5 rounded-full bg-quant-muted" /> SPY benchmark</span>
+      </div>
+    </div>
+  );
+}
+
+function PendingPortfolioCurve({ simulation }: { simulation: PortfolioSimulation }) {
+  const threshold = simulation.return_threshold_pct ?? 0.05;
+
+  return (
+    <div className="rounded-md border border-quant-line bg-quant-bg/60 p-3">
+      <div className="relative flex h-72 items-center justify-center overflow-hidden rounded-md border border-dashed border-quant-yellow/40 bg-quant-bg/55 px-4 text-center">
+        <div>
+          <p className="text-sm font-black text-quant-yellow">No actionable trades yet</p>
+          <p className="mt-2 max-w-xl text-xs leading-5 text-quant-muted">
+            {simulation.flat_signals ?? simulation.signals} signals are still inside the +/-{threshold}% flat band, so Basis is holding them out of strategy return, win rate, and SPY excess calculations.
+          </p>
+        </div>
+      </div>
+      <div className="mt-1 flex items-center justify-between text-[0.65rem] font-bold text-quant-muted">
+        <span>Total signals: {simulation.signals}</span>
+        <span>Actionable: {simulation.actionable_signals ?? 0}</span>
+        <span>Flat / pending: {simulation.flat_signals ?? simulation.signals}</span>
       </div>
     </div>
   );

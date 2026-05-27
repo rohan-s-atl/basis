@@ -27,6 +27,7 @@ DEFAULT_FEATURE_NAMES_PATH = _MODELS_DIR / "feature_names.json"
 DEFAULT_DECISION_THRESHOLD_PATH = _MODELS_DIR / "decision_threshold.json"
 
 TRAIN_FRACTION = 0.8
+VALIDATION_FRACTION = 0.15
 MIN_FOLD_SAMPLES = 5
 N_CV_FOLDS = 5
 CONFIDENCE_BUCKETS = (
@@ -81,6 +82,7 @@ class TrainingResult:
     dataset_size: int
     label_balance: dict[str, float | int]
     train_size: int
+    validation_size: int
     test_size: int
     accuracy: float
     roc_auc: float | None
@@ -370,10 +372,19 @@ def train_xgboost_from_data(
 ) -> TrainingResult:
     _validate_training_data(data)
 
-    split = int(len(data.X) * TRAIN_FRACTION)
-    X_train, X_test = data.X.iloc[:split], data.X.iloc[split:]
-    y_train, y_test = data.y.iloc[:split], data.y.iloc[split:]
-    _validate_split(y_train, y_test)
+    train_end = int(len(data.X) * (1.0 - VALIDATION_FRACTION * 2))
+    validation_end = int(len(data.X) * (1.0 - VALIDATION_FRACTION))
+    X_train, X_validation, X_test = (
+        data.X.iloc[:train_end],
+        data.X.iloc[train_end:validation_end],
+        data.X.iloc[validation_end:],
+    )
+    y_train, y_validation, y_test = (
+        data.y.iloc[:train_end],
+        data.y.iloc[train_end:validation_end],
+        data.y.iloc[validation_end:],
+    )
+    _validate_split(y_train, y_validation, y_test)
 
     # Train raw XGBoost
     xgb = build_xgboost()
@@ -392,9 +403,10 @@ def train_xgboost_from_data(
     calibrated = calibrate(X_train, y_train)
     cal_metrics = calibration_metrics(xgb, calibrated, X_test, y_test)
 
-    # Final evaluation using calibrated model
+    # Tune threshold on validation, then report accuracy on untouched test data.
+    validation_proba = calibrated.predict_proba(X_validation)[:, 1]
+    threshold = optimize_decision_threshold(y_validation, validation_proba)
     cal_proba = calibrated.predict_proba(X_test)[:, 1]
-    threshold = optimize_decision_threshold(y_test, cal_proba)
     y_pred = (cal_proba >= threshold.threshold).astype(int)
     accuracy = round(float(accuracy_score(y_test, y_pred)), 4)
     roc_auc = _safe_roc_auc(y_test, cal_proba)
@@ -419,6 +431,7 @@ def train_xgboost_from_data(
         dataset_size=len(data.y),
         label_balance=_label_balance(data.y),
         train_size=len(y_train),
+        validation_size=len(y_validation),
         test_size=len(y_test),
         accuracy=accuracy,
         roc_auc=round(roc_auc, 4) if roc_auc is not None else None,
@@ -444,7 +457,7 @@ def train_xgboost_from_data(
 def print_training_summary(result: TrainingResult) -> None:
     print(f"\n{'='*60}")
     print(f"Dataset:        {result.dataset_size} samples  "
-          f"(train={result.train_size}, test={result.test_size})")
+          f"(train={result.train_size}, validation={result.validation_size}, test={result.test_size})")
     print(f"Label balance:  {result.label_balance}")
     print(f"\nAccuracy (calibrated):  {result.accuracy:.4f}")
     print(f"Decision threshold:     {result.decision_threshold.threshold:.4f} "
@@ -528,11 +541,15 @@ def _validate_training_data(data: TrainingData) -> None:
         raise ValueError("Training labels must contain at least two classes.")
 
 
-def _validate_split(y_train: pd.Series, y_test: pd.Series) -> None:
-    if y_train.empty or y_test.empty:
-        raise ValueError("Train/test split produced an empty partition.")
+def _validate_split(y_train: pd.Series, y_validation: pd.Series, y_test: pd.Series) -> None:
+    if y_train.empty or y_validation.empty or y_test.empty:
+        raise ValueError("Train/validation/test split produced an empty partition.")
     if y_train.nunique() < 2:
         raise ValueError("Training split must contain at least two label classes.")
+    if y_validation.nunique() < 2:
+        raise ValueError("Validation split must contain at least two label classes.")
+    if y_test.nunique() < 2:
+        raise ValueError("Test split must contain at least two label classes.")
 
 
 # ---------------------------------------------------------------------------

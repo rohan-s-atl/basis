@@ -184,6 +184,9 @@ export type PortfolioSimulation = {
   benchmark_return_pct: number;
   excess_return_pct: number;
   signals: number;
+  actionable_signals: number;
+  flat_signals: number;
+  return_threshold_pct: number;
   win_rate_pct: number;
   allocation_pct: number;
   points: PortfolioSimulationPoint[];

@@ -1102,6 +1102,8 @@ function PortfolioPage({ appData }: { appData: AppData }) {
   const summary = appData.backtest;
   const portfolio = appData.portfolio;
   const earlyModel = (appData.trainingStats?.num_samples ?? 0) < 300;
+  const actionableSignals = summary?.actionable_signals ?? portfolio?.actionable_signals ?? 0;
+  const hasActionableSignals = actionableSignals > 0;
   return (
     <div className="grid gap-5">
       {earlyModel && (
@@ -1116,9 +1118,9 @@ function PortfolioPage({ appData }: { appData: AppData }) {
         </section>
       )}
       <div className="grid gap-3 md:grid-cols-4">
-        <MetricCard label="Strategy return" value={portfolio ? `${portfolio.total_return_pct >= 0 ? "+" : ""}${portfolio.total_return_pct}%` : "--"} icon={LineChart} onClick={() => go("#/portfolio")} />
-        <MetricCard label="SPY benchmark" value={portfolio ? `${portfolio.benchmark_return_pct >= 0 ? "+" : ""}${portfolio.benchmark_return_pct}%` : "--"} icon={Activity} onClick={() => go("#/portfolio")} />
-        <MetricCard label="Win rate" value={portfolio ? `${portfolio.win_rate_pct}%` : "--"} icon={Target} onClick={() => go("#/portfolio")} />
+        <MetricCard label="Strategy return" value={portfolio ? hasActionableSignals ? `${portfolio.total_return_pct >= 0 ? "+" : ""}${portfolio.total_return_pct}%` : "Pending" : "--"} icon={LineChart} onClick={() => go("#/portfolio")} />
+        <MetricCard label="SPY benchmark" value={portfolio ? hasActionableSignals ? `${portfolio.benchmark_return_pct >= 0 ? "+" : ""}${portfolio.benchmark_return_pct}%` : "Pending" : "--"} icon={Activity} onClick={() => go("#/portfolio")} />
+        <MetricCard label="Win rate" value={portfolio ? hasActionableSignals ? `${portfolio.win_rate_pct}%` : "N/A" : "--"} icon={Target} onClick={() => go("#/portfolio")} />
         <MetricCard label="Signals" value={summary?.total_signals.toString() ?? "--"} icon={FileText} onClick={() => go("#/portfolio")} />
       </div>
       <div className="grid gap-5 2xl:grid-cols-[minmax(0,1.4fr)_minmax(420px,0.8fr)]">
@@ -1633,6 +1635,8 @@ function PortfolioInsightPanel({ portfolio, summary }: { portfolio: PortfolioSim
   const pendingShare = total > 0 ? Math.round((pending / total) * 100) : 0;
   const verdict = !portfolio
     ? "Run the backtest to build a benchmarked strategy curve."
+    : actionable === 0
+      ? "Basis is tracking signals, but none have moved enough to count as actionable strategy outcomes yet."
     : portfolio.excess_return_pct >= 0
       ? "The signal strategy is ahead of SPY on the current labeled window."
       : "The signal strategy is trailing SPY on the current labeled window.";
@@ -1803,6 +1807,9 @@ function DetailStat({ label, value }: { label: string; value: string }) {
 function MiniReturnPanel({ portfolio }: { portfolio: PortfolioSimulation | null }) {
   if (!portfolio || portfolio.signals === 0) {
     return <p className="text-sm text-quant-muted">Run the backtest to generate a portfolio curve.</p>;
+  }
+  if ((portfolio.actionable_signals ?? portfolio.signals) === 0) {
+    return <p className="text-sm text-quant-muted">Signals are tracking, but the portfolio curve starts after at least one signal clears the flat band.</p>;
   }
   return (
     <div>

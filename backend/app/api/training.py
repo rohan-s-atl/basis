@@ -125,6 +125,7 @@ def train_model(
         "dataset_size": payload["dataset_size"],
         "label_balance": payload["label_balance"],
         "train_size": payload["train_size"],
+        "validation_size": payload["validation_size"],
         "test_size": payload["test_size"],
         "accuracy": payload["accuracy"],
         "roc_auc": payload["roc_auc"],

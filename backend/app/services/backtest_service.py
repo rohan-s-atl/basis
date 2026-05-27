@@ -89,7 +89,15 @@ def get_backtest_summary(db: Session) -> dict:
 
 def get_portfolio_simulation(db: Session) -> dict:
     records = list_signal_backtests(db, limit=500)
+    actionable_records = [record for record in records if _is_actionable(record)]
     ordered = sorted(
+        actionable_records,
+        key=lambda record: (
+            record.evaluated_at is None,
+            record.evaluated_at.isoformat() if record.evaluated_at else str(record.id),
+        ),
+    )
+    all_ordered = sorted(
         records,
         key=lambda record: (
             record.evaluated_at is None,
@@ -134,7 +142,10 @@ def get_portfolio_simulation(db: Session) -> dict:
         "total_return_pct": final_return,
         "benchmark_return_pct": benchmark_return,
         "excess_return_pct": round(final_return - benchmark_return, 3),
-        "signals": len(ordered),
+        "signals": len(all_ordered),
+        "actionable_signals": len(ordered),
+        "flat_signals": len(all_ordered) - len(ordered),
+        "return_threshold_pct": _ACTIONABLE_RETURN_THRESHOLD_PCT,
         "win_rate_pct": round((wins / len(ordered)) * 100.0, 1) if ordered else 0.0,
         "allocation_pct": round(_SIGNAL_ALLOCATION * 100.0, 1),
         "points": points,
@@ -248,9 +259,13 @@ def _is_signal_correct(direction: str, return_pct: float) -> bool:
 
 
 def _outcome_status(record: SignalBacktest) -> str:
-    if abs(record.return_pct) < _ACTIONABLE_RETURN_THRESHOLD_PCT:
+    if not _is_actionable(record):
         return "flat"
     return "correct" if record.correct else "incorrect"
+
+
+def _is_actionable(record: SignalBacktest) -> bool:
+    return abs(record.return_pct) >= _ACTIONABLE_RETURN_THRESHOLD_PCT
 
 
 def _signal_return_pct(record: SignalBacktest) -> float:

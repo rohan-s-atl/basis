@@ -167,6 +167,9 @@ class PortfolioSimulation(BaseModel):
     benchmark_return_pct: float
     excess_return_pct: float
     signals: int
+    actionable_signals: int
+    flat_signals: int
+    return_threshold_pct: float
     win_rate_pct: float
     allocation_pct: float
     points: list[PortfolioSimulationPoint]

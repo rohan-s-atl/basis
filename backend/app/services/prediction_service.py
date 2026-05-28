@@ -4,8 +4,10 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Event, EventRecord, FeatureSnapshot, MultiHorizonOutcome, Outcome, Prediction
 from app.repositories.event_repository import list_recent_events
+from app.services.baseline_scoring import BASELINE_MODEL_VERSION
 from app.services.feature_service import build_feature_vector, score_signal_quality
 from app.services.ml_scorer import explain_prediction
+from app.services.model_evaluation_service import get_model_evaluation
 from app.services.training_run_service import get_model_health
 from app.services.mapping_service import asset_exposure_for
 
@@ -31,6 +33,7 @@ MIN_SIGNAL_QUALITY = 0.62
 GATED_ASSETS = {"GLD", "XLF"}
 GATED_EVENT_TYPES = {"interest_rate_change"}
 GATED_HORIZON_DAYS = {3}
+CURRENT_MODEL_PREFIX = "xgboost-v1"
 
 
 def generate_predictions(
@@ -40,7 +43,13 @@ def generate_predictions(
     min_quality: float = MIN_SIGNAL_QUALITY,
     include_weak: bool = False,
 ) -> dict:
-    stored = _stored_ml_predictions(db, limit=limit, min_quality=min_quality)
+    calibration_profile = _calibration_profile(db)
+    stored = _stored_ml_predictions(
+        db,
+        limit=limit,
+        min_quality=min_quality,
+        calibration_profile=calibration_profile,
+    )
     if stored:
         filtered = [
             item
@@ -101,6 +110,7 @@ def generate_predictions(
                 min_quality=min_quality,
                 segment_quality_reason=_segment_quality_reason(db, symbol, event.event_type, horizon),
                 drift_reason=_drift_reason(db),
+                calibration_reason=None,
             )
             if filter_reason and not include_weak:
                 weak_filtered += 1
@@ -157,14 +167,13 @@ def generate_predictions(
     }
 
 
-def _stored_ml_predictions(db: Session, limit: int, min_quality: float) -> list[dict]:
-    rows = (
-        db.query(Prediction, FeatureSnapshot)
-        .join(FeatureSnapshot, FeatureSnapshot.prediction_id == Prediction.id)
-        .order_by(Prediction.timestamp.desc())
-        .limit(limit)
-        .all()
-    )
+def _stored_ml_predictions(
+    db: Session,
+    limit: int,
+    min_quality: float,
+    calibration_profile: dict[str, dict[str, dict[str, float | int]]] | None,
+) -> list[dict]:
+    rows = _stored_prediction_rows(db, limit=limit)
     predictions: list[dict] = []
     for prediction, snapshot in rows:
         event = prediction.event
@@ -182,6 +191,7 @@ def _stored_ml_predictions(db: Session, limit: int, min_quality: float) -> list[
             expected_move=expected_move,
             severity=_severity_label(float(event.severity) if event is not None else 0.0),
         )
+        calibration_reason = _calibration_filter_reason(calibration_profile, model_version, confidence)
         filter_reason = _filter_reason(
             symbol=prediction.asset,
             event_type=event.event_type if event is not None else "general_market",
@@ -197,6 +207,8 @@ def _stored_ml_predictions(db: Session, limit: int, min_quality: float) -> list[
                 prediction.horizon,
             ),
             drift_reason=_drift_reason(db),
+            calibration_reason=calibration_reason,
+            model_version=model_version,
         )
         shap = explain_prediction(
             snapshot.event_features,
@@ -240,6 +252,26 @@ def _stored_ml_predictions(db: Session, limit: int, min_quality: float) -> list[
 
     predictions.sort(key=lambda item: (item["probability"], abs(item["expected_move_pct"])), reverse=True)
     return predictions
+
+
+def _stored_prediction_rows(db: Session, *, limit: int) -> list[tuple[Prediction, FeatureSnapshot]]:
+    query = (
+        db.query(Prediction, FeatureSnapshot)
+        .join(FeatureSnapshot, FeatureSnapshot.prediction_id == Prediction.id)
+    )
+    ml_rows = (
+        query.filter(Prediction.model_version.like(f"{CURRENT_MODEL_PREFIX}%"))
+        .order_by(Prediction.timestamp.desc())
+        .limit(limit)
+        .all()
+    )
+    if ml_rows:
+        return ml_rows
+    return (
+        query.order_by(Prediction.timestamp.desc())
+        .limit(limit)
+        .all()
+    )
 
 
 def _summary_model_version(predictions: list[dict]) -> str:
@@ -314,9 +346,15 @@ def _filter_reason(
     min_quality: float,
     segment_quality_reason: str | None = None,
     drift_reason: str | None = None,
+    calibration_reason: str | None = None,
+    model_version: str | None = None,
 ) -> str | None:
+    if model_version == BASELINE_MODEL_VERSION:
+        return "stale_baseline_model"
     if drift_reason is not None:
         return drift_reason
+    if calibration_reason is not None:
+        return calibration_reason
     segment_reason = _segment_filter_reason(
         symbol=symbol,
         event_type=event_type,
@@ -359,6 +397,16 @@ def _confidence_tier(probability: float) -> str:
     return "low"
 
 
+def _confidence_bucket(confidence: float) -> str:
+    if confidence < 0.6:
+        return "0.5-0.6"
+    if confidence < 0.7:
+        return "0.6-0.7"
+    if confidence < 0.8:
+        return "0.7-0.8"
+    return "0.8+"
+
+
 def _gate_status(filter_reason: str | None) -> dict[str, str | bool | None]:
     return {
         "passed": filter_reason is None,
@@ -379,6 +427,47 @@ def _risk_factors(filter_reason: str | None, event_type: str) -> list[str]:
     if event_type in {"inflation", "interest_rate_change"}:
         risks.append("rates repricing risk")
     return risks or ["model uncertainty", "market regime shift"]
+
+
+def _calibration_profile(db: Session) -> dict[str, dict[str, dict[str, float | int]]] | None:
+    try:
+        evaluation = get_model_evaluation(db, limit=50_000)
+    except Exception:
+        return None
+    by_model = evaluation.get("calibration_by_model_version")
+    if not isinstance(by_model, dict):
+        return None
+    return {
+        str(model_version): calibration
+        for model_version, calibration in by_model.items()
+        if isinstance(calibration, dict)
+    }
+
+
+def _calibration_filter_reason(
+    profile: dict[str, dict[str, dict[str, float | int]]] | None,
+    model_version: str,
+    confidence: float,
+) -> str | None:
+    if profile is None:
+        return None
+    buckets = profile.get(model_version)
+    if buckets is None and model_version.startswith(CURRENT_MODEL_PREFIX):
+        buckets = next(
+            (value for key, value in profile.items() if key.startswith(CURRENT_MODEL_PREFIX)),
+            None,
+        )
+    if buckets is None:
+        return None
+    bucket = buckets.get(_confidence_bucket(confidence))
+    if not bucket:
+        return None
+    samples = int(bucket.get("samples", 0))
+    observed_accuracy = float(bucket.get("observed_accuracy", 0.0))
+    avg_excess_return = float(bucket.get("avg_excess_return", 0.0))
+    if samples >= 30 and (observed_accuracy < 0.55 or avg_excess_return < -0.001):
+        return "weak_calibration_bucket"
+    return None
 
 
 def _drift_reason(db: Session) -> str | None:

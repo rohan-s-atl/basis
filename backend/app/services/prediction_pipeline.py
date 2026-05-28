@@ -293,16 +293,37 @@ def _store_predictions_for_assets(
 
 
 def _prediction_exists(db: Session, event: Event, symbol: str, horizon: str) -> bool:
-    return (
-        db.query(Prediction.id)
-        .filter(
-            Prediction.event_id == event.id,
-            Prediction.asset == symbol,
-            Prediction.horizon == horizon,
+    existing_versions = [
+        str(version)
+        for (version,) in (
+            db.query(Prediction.model_version)
+            .filter(
+                Prediction.event_id == event.id,
+                Prediction.asset == symbol,
+                Prediction.horizon == horizon,
+            )
+            .all()
         )
-        .first()
-        is not None
-    )
+    ]
+    if not existing_versions:
+        return False
+    if any(version.startswith("xgboost-v1") for version in existing_versions):
+        return True
+    if _ml_artifacts_available():
+        return False
+    return True
+
+
+def _ml_artifacts_available() -> bool:
+    try:
+        from ml.model_store import get_calibrated_model, get_feature_names, get_model, get_horizon_artifacts
+
+        return (
+            (get_calibrated_model() is not None or get_model() is not None)
+            and get_feature_names() is not None
+        ) or get_horizon_artifacts(1)[0] is not None
+    except Exception:
+        return False
 
 
 def _current_benchmark_price() -> float | None:

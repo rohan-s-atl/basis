@@ -17,6 +17,7 @@ _DRIFT_THRESHOLD = 0.10  # 10 percentage-point drop from peak triggers drift ale
 _CONFIDENCE_DRIFT_WINDOW = 50
 _CONFIDENCE_DRIFT_THRESHOLD = 0.20
 _CONFIDENCE_BUCKETS = (0.6, 0.7, 0.8)
+CURRENT_MODEL_PREFIX = "xgboost-v1"
 
 
 def save_training_run(
@@ -95,8 +96,9 @@ def should_auto_retrain(db: Session, current_dataset_size: int) -> bool:
 
 def get_model_health(db: Session) -> dict[str, Any]:
     latest = get_latest_run(db)
-    rolling = _rolling_accuracy(db, window=_DRIFT_WINDOW)
-    confidence_drift = _confidence_distribution_drift(db, latest)
+    active_model_version = _active_prediction_model_version(db)
+    rolling = _rolling_accuracy(db, window=_DRIFT_WINDOW, model_version=active_model_version)
+    confidence_drift = _confidence_distribution_drift(db, latest, model_version=active_model_version)
 
     if latest is None:
         return {
@@ -109,6 +111,7 @@ def get_model_health(db: Session) -> dict[str, Any]:
             "trained_roc_auc": None,
             "drift_detected": False,
             "confidence_drift": confidence_drift,
+            "active_model_version": active_model_version,
             "last_trained_at": None,
             "dataset_size_at_training": None,
             "retraining_threshold": AUTO_RETRAIN_MIN_GROWTH,
@@ -132,21 +135,42 @@ def get_model_health(db: Session) -> dict[str, Any]:
         "trained_roc_auc": latest.roc_auc,
         "drift_detected": drift,
         "confidence_drift": confidence_drift,
+        "active_model_version": active_model_version,
         "last_trained_at": latest.trained_at.isoformat(),
         "dataset_size_at_training": latest.dataset_size,
         "retraining_threshold": AUTO_RETRAIN_MIN_GROWTH,
     }
 
 
-def _rolling_accuracy(db: Session, *, window: int) -> dict[str, Any] | None:
+def _active_prediction_model_version(db: Session) -> str | None:
+    row = (
+        db.query(Prediction.model_version)
+        .filter(Prediction.model_version.like(f"{CURRENT_MODEL_PREFIX}%"))
+        .order_by(Prediction.timestamp.desc())
+        .first()
+    )
+    if row is not None:
+        return str(row[0])
+    return None
+
+
+def _rolling_accuracy(
+    db: Session,
+    *,
+    window: int,
+    model_version: str | None = None,
+) -> dict[str, Any] | None:
     multi_rows = [
         (timestamp, _direction_matches_label(direction, _target_label(benchmark_label, label)))
         for timestamp, direction, benchmark_label, label in (
-            db.query(
+            _apply_model_version_filter(
+                db.query(
                 Prediction.timestamp,
                 Prediction.predicted_direction,
                 MultiHorizonOutcome.benchmark_label,
                 MultiHorizonOutcome.label,
+                ),
+                model_version,
             )
             .join(MultiHorizonOutcome, MultiHorizonOutcome.prediction_id == Prediction.id)
             .filter(MultiHorizonOutcome.benchmark_label.isnot(None) | MultiHorizonOutcome.label.isnot(None))
@@ -165,7 +189,10 @@ def _rolling_accuracy(db: Session, *, window: int) -> dict[str, Any] | None:
     single_rows = [
         (timestamp, _direction_matches_label(direction, _target_label(benchmark_label, label)))
         for timestamp, direction, benchmark_label, label in (
-            db.query(Prediction.timestamp, Prediction.predicted_direction, Outcome.benchmark_label, Outcome.label)
+            _apply_model_version_filter(
+                db.query(Prediction.timestamp, Prediction.predicted_direction, Outcome.benchmark_label, Outcome.label),
+                model_version,
+            )
             .join(Outcome, Outcome.prediction_id == Prediction.id)
             .filter(
                 Outcome.benchmark_label.isnot(None) | Outcome.label.isnot(None),
@@ -191,7 +218,12 @@ def _rolling_accuracy(db: Session, *, window: int) -> dict[str, Any] | None:
     }
 
 
-def _confidence_distribution_drift(db: Session, latest: TrainingRun | None) -> dict[str, Any]:
+def _confidence_distribution_drift(
+    db: Session,
+    latest: TrainingRun | None,
+    *,
+    model_version: str | None = None,
+) -> dict[str, Any]:
     if latest is None:
         return {
             "drift_detected": False,
@@ -200,12 +232,13 @@ def _confidence_distribution_drift(db: Session, latest: TrainingRun | None) -> d
             "training": [],
             "recent": [],
             "samples": 0,
+            "model_version": model_version or "all",
         }
 
     training_confidences = [
         float(confidence)
         for (confidence,) in (
-            db.query(Prediction.confidence)
+            _apply_model_version_filter(db.query(Prediction.confidence), model_version)
             .join(Outcome, Outcome.prediction_id == Prediction.id)
             .filter(
                 Outcome.filtered_label.isnot(None),
@@ -217,7 +250,7 @@ def _confidence_distribution_drift(db: Session, latest: TrainingRun | None) -> d
     recent_confidences = [
         float(confidence)
         for (confidence,) in (
-            db.query(Prediction.confidence)
+            _apply_model_version_filter(db.query(Prediction.confidence), model_version)
             .order_by(Prediction.timestamp.desc())
             .limit(_CONFIDENCE_DRIFT_WINDOW)
             .all()
@@ -236,7 +269,14 @@ def _confidence_distribution_drift(db: Session, latest: TrainingRun | None) -> d
         "training": training_dist,
         "recent": recent_dist,
         "samples": len(recent_confidences),
+        "model_version": model_version or "all",
     }
+
+
+def _apply_model_version_filter(query, model_version: str | None):
+    if model_version is None:
+        return query
+    return query.filter(Prediction.model_version == model_version)
 
 
 def _confidence_distribution(confidences: list[float]) -> list[float]:

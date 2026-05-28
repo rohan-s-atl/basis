@@ -33,11 +33,38 @@ class EvaluationRow:
     benchmark_label: int | None
 
 
-def get_model_evaluation(db: Session, *, limit: int = 50_000) -> dict[str, Any]:
-    rows = _evaluation_rows(db, limit=limit)
+CURRENT_MODEL_PREFIX = "xgboost-v1"
+LEGACY_MODEL_VERSIONS = {"baseline-rule-v1", "historical_seed"}
+
+
+def get_model_evaluation(
+    db: Session,
+    *,
+    limit: int = 50_000,
+    model_version: str | None = None,
+    current_only: bool = False,
+) -> dict[str, Any]:
+    all_rows = _evaluation_rows(db, limit=limit)
+    selected_model_version = model_version
+    if selected_model_version is None and current_only:
+        selected_model_version = _current_model_version(all_rows)
+    rows = _filter_model_rows(all_rows, selected_model_version)
     dataset_validation = validate_dataset(db, limit=limit)
+    current_rows = _filter_model_rows(all_rows, _current_model_version(all_rows))
     return {
         "sample_count": len(rows),
+        "included_model_versions": _model_versions(rows),
+        "selected_model_version": selected_model_version or "all",
+        "current_model_version": _current_model_version(all_rows),
+        "current_model": {
+            "sample_count": len(current_rows),
+            "overall": _performance(current_rows),
+            "high_confidence": _performance([row for row in current_rows if row.confidence >= 0.7]),
+            "benchmark_relative": _benchmark_relative_performance(current_rows),
+            "baselines": _baseline_comparison(current_rows),
+            "calibration": _calibration(current_rows),
+            "recommendations": _recommendations(current_rows, dataset_validation),
+        },
         "overall": _performance(rows),
         "high_confidence": _performance([row for row in rows if row.confidence >= 0.7]),
         "benchmark_relative": _benchmark_relative_performance(rows),
@@ -49,11 +76,35 @@ def get_model_evaluation(db: Session, *, limit: int = 50_000) -> dict[str, Any]:
         "by_return_bucket": _group_performance(rows, "return_bucket"),
         "by_model_version": _group_performance(rows, "model_version"),
         "calibration": _calibration(rows),
+        "calibration_by_model_version": _calibration_by_group(rows, "model_version"),
         "calibration_by_horizon": _calibration_by_group(rows, "horizon_days"),
         "calibration_by_event_type": _calibration_by_group(rows, "event_type"),
         "data_quality": _data_quality(db, dataset_validation),
         "recommendations": _recommendations(rows, dataset_validation),
     }
+
+
+def _current_model_version(rows: list[EvaluationRow]) -> str | None:
+    for row in sorted(rows, key=lambda item: item.timestamp, reverse=True):
+        if row.model_version.startswith(CURRENT_MODEL_PREFIX):
+            return row.model_version
+    for row in sorted(rows, key=lambda item: item.timestamp, reverse=True):
+        if row.model_version not in LEGACY_MODEL_VERSIONS:
+            return row.model_version
+    return None
+
+
+def _filter_model_rows(rows: list[EvaluationRow], model_version: str | None) -> list[EvaluationRow]:
+    if model_version is None:
+        return rows
+    if model_version.endswith("*"):
+        prefix = model_version[:-1]
+        return [row for row in rows if row.model_version.startswith(prefix)]
+    return [row for row in rows if row.model_version == model_version]
+
+
+def _model_versions(rows: list[EvaluationRow]) -> list[str]:
+    return sorted({row.model_version for row in rows})
 
 
 def _evaluation_rows(db: Session, *, limit: int) -> list[EvaluationRow]:

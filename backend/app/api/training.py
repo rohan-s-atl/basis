@@ -20,6 +20,8 @@ from app.services.training_run_service import (
     get_training_history,
     save_training_run,
 )
+from app.services.prediction_pipeline import run_prediction_pipeline
+from app.db.models import Event
 
 router = APIRouter(tags=["training-data"])
 
@@ -101,9 +103,16 @@ def read_model_health(db: Session = Depends(get_db)) -> dict[str, Any]:
 @router.get("/model-evaluation")
 def read_model_evaluation(
     limit: int = 50_000,
+    model_version: str | None = None,
+    current_only: bool = False,
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    return get_model_evaluation(db, limit=min(limit, 50_000))
+    return get_model_evaluation(
+        db,
+        limit=min(limit, 50_000),
+        model_version=model_version,
+        current_only=current_only,
+    )
 
 
 @router.post("/train-model")
@@ -137,4 +146,36 @@ def train_model(
         "top_features": payload["top_features"],
         "shap_summary": payload["shap_summary"],
         "confidence_analysis": payload["confidence_analysis"],
+    }
+
+
+@router.post("/refresh-predictions")
+def refresh_predictions(
+    limit: int = 100,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    events = (
+        db.query(Event)
+        .order_by(Event.timestamp.desc())
+        .limit(min(limit, 500))
+        .all()
+    )
+    created = 0
+    skipped = 0
+    failed = 0
+    for event in events:
+        try:
+            event_created = len(run_prediction_pipeline(event, db=db))
+        except Exception:
+            db.rollback()
+            failed += 1
+            continue
+        created += event_created
+        if event_created == 0:
+            skipped += 1
+    return {
+        "events_considered": len(events),
+        "predictions_created": created,
+        "events_skipped_or_already_current": skipped,
+        "events_failed": failed,
     }

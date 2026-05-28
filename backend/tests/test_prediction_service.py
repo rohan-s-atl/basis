@@ -112,6 +112,73 @@ def test_generate_predictions_applies_min_quality_to_stored_predictions(monkeypa
     assert relaxed_payload["predictions"][0]["is_actionable"] is True
 
 
+def test_generate_predictions_prefers_ml_predictions_over_newer_baseline(monkeypatch) -> None:
+    monkeypatch.setattr("app.services.prediction_service.explain_prediction", lambda *args: [])
+
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    Base.metadata.create_all(bind=engine)
+    db = TestingSessionLocal()
+
+    event = Event(
+        timestamp=datetime.now(UTC),
+        event_type="general_market",
+        sentiment=0.2,
+        severity=0.5,
+        raw_text="Stored signal\nMarket update",
+        source="test",
+        model_version="test",
+    )
+    baseline_prediction = Prediction(
+        event=event,
+        asset="SPY",
+        predicted_direction="down",
+        confidence=0.95,
+        horizon="1d",
+        model_version="baseline-rule-v1",
+        timestamp=datetime.now(UTC),
+    )
+    ml_prediction = Prediction(
+        event=event,
+        asset="QQQ",
+        predicted_direction="up",
+        confidence=0.7,
+        horizon="1d",
+        model_version="xgboost-v1",
+        timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    db.add_all(
+        [
+            FeatureSnapshot(
+                prediction=baseline_prediction,
+                event_features={},
+                market_features={"rolling_volatility": 0.02},
+                derived_features={"prediction_model_version": "baseline-rule-v1"},
+            ),
+            FeatureSnapshot(
+                prediction=ml_prediction,
+                event_features={},
+                market_features={"rolling_volatility": 0.01},
+                derived_features={"prediction_model_version": "xgboost-v1"},
+            ),
+        ]
+    )
+    db.commit()
+
+    try:
+        payload = generate_predictions(db, min_quality=0)
+    finally:
+        db.close()
+
+    assert payload["count"] == 1
+    assert payload["model_version"] == "xgboost-v1"
+    assert payload["predictions"][0]["symbol"] == "QQQ"
+
+
 @pytest.mark.parametrize(
     ("asset", "event_type", "horizon", "expected_reason"),
     [

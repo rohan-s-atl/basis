@@ -23,7 +23,9 @@ from app.services.feature_service import (
     severity_to_score,
 )
 from app.services.mapping_service import map_article_to_assets
+from app.services.mapping_service import asset_exposure_for
 from app.services.market_service import fetch_price
+from app.services.market_context_service import fetch_market_context
 
 from app.services.baseline_scoring import BASELINE_MODEL_VERSION
 logger = logging.getLogger(__name__)
@@ -173,10 +175,20 @@ def _store_predictions_for_assets(
             continue
 
         try:
-            market_data = fetch_price(symbol)
+            context = fetch_market_context(symbol)
+            market_data = {
+                "symbol": context.symbol,
+                "price": context.price,
+                "history": context.close_history,
+            }
         except Exception as exc:
-            logger.warning("Skipping persisted prediction for %s: %s", symbol, exc)
-            continue
+            logger.warning("Using thin market context for %s: %s", symbol, exc)
+            try:
+                market_data = fetch_price(symbol)
+                context = None
+            except Exception as price_exc:
+                logger.warning("Skipping persisted prediction for %s: %s", symbol, price_exc)
+                continue
         price = float(market_data["price"])
         history = [float(value) for value in market_data.get("history", [])]
         sector_return_5d, sector_return_10d = _sector_return_features(symbol, history)
@@ -186,9 +198,22 @@ def _store_predictions_for_assets(
             history=history,
             sector_return_5d=sector_return_5d,
             sector_return_10d=sector_return_10d,
+            beta_to_spy=float(context.beta_to_spy) if context is not None else 1.0,
+            volume_ratio=float(context.volume_ratio) if context is not None else 1.0,
+            dollar_trend=float(context.dollar_trend_20d) if context is not None else 0.0,
+            oil_trend=float(context.oil_trend_20d) if context is not None else 0.0,
+            spy_return_20d=float(context.spy_return_20d) if context is not None else 0.0,
         )
+        exposure = asset_exposure_for(
+            symbol,
+            {
+                "event_type": event.event_type,
+                "affected_sectors": sectors,
+            },
+        )
+        asset_sentiment = float(event_features["sentiment"]) * float(exposure["sign"])
         baseline = score_baseline_prediction(
-            sentiment=float(event_features["sentiment"]),
+            sentiment=asset_sentiment,
             severity=float(event_features["severity"]),
             volatility=float(market_features["rolling_volatility"]),
         )
@@ -226,6 +251,8 @@ def _store_predictions_for_assets(
             spy_trend=float(regime.get("spy_trend", 0.0)),
             rate_level=float(regime.get("rate_level", 4.0)),
             market_regime_encoded=int(regime.get("market_regime_encoded", 1)),
+            asset_exposure_sign=float(exposure["sign"]),
+            asset_exposure_confidence=float(exposure["confidence"]),
         )
         if benchmark_price is not None:
             derived_features["benchmark_price"] = benchmark_price

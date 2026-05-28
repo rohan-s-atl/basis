@@ -78,6 +78,15 @@ class DecisionThreshold:
 
 
 @dataclass(frozen=True)
+class SegmentModelResult:
+    segment: str
+    samples: int
+    accuracy: float
+    roc_auc: float | None
+    threshold: float
+
+
+@dataclass(frozen=True)
 class TrainingResult:
     dataset_size: int
     label_balance: dict[str, float | int]
@@ -94,6 +103,7 @@ class TrainingResult:
     model_comparison: ModelComparison
     calibration: CalibrationMetrics
     decision_threshold: DecisionThreshold
+    segment_models: list[SegmentModelResult]
     model_path: str
     calibrated_model_path: str
 
@@ -306,6 +316,53 @@ def optimize_decision_threshold(
     )
 
 
+def train_segment_models(data: TrainingData, *, base_dir: Path, min_samples: int = 30) -> list[SegmentModelResult]:
+    """Train semi-separate calibrated models by horizon when the segment is large enough."""
+    horizon_feature = "derived_horizon_days"
+    if horizon_feature not in data.X.columns:
+        return []
+
+    results: list[SegmentModelResult] = []
+    horizons = sorted({int(value) for value in data.X[horizon_feature].dropna().tolist()})
+    for horizon in horizons:
+        mask = data.X[horizon_feature].astype(int) == horizon
+        X_segment = data.X.loc[mask]
+        y_segment = data.y.loc[mask]
+        if len(y_segment) < min_samples or y_segment.nunique() < 2:
+            continue
+
+        split = int(len(X_segment) * 0.8)
+        X_train, X_test = X_segment.iloc[:split], X_segment.iloc[split:]
+        y_train, y_test = y_segment.iloc[:split], y_segment.iloc[split:]
+        if y_train.nunique() < 2 or y_test.empty or y_test.nunique() < 2:
+            continue
+        if int(y_train.value_counts().min()) < 3:
+            continue
+
+        model = calibrate(X_train, y_train)
+        proba = model.predict_proba(X_test)[:, 1]
+        threshold = optimize_decision_threshold(y_test, proba)
+        pred = (proba >= threshold.threshold).astype(int)
+
+        segment_dir = base_dir / f"{horizon}d"
+        segment_dir.mkdir(parents=True, exist_ok=True)
+        joblib.dump(model, segment_dir / "calibrated_model.pkl")
+        (segment_dir / "feature_names.json").write_text(json.dumps(data.feature_names))
+        (segment_dir / "decision_threshold.json").write_text(json.dumps(asdict(threshold)))
+
+        results.append(
+            SegmentModelResult(
+                segment=f"{horizon}d",
+                samples=len(y_segment),
+                accuracy=round(float(accuracy_score(y_test, pred)), 4),
+                roc_auc=round(_safe_roc_auc(y_test, proba), 4) if _safe_roc_auc(y_test, proba) is not None else None,
+                threshold=threshold.threshold,
+            )
+        )
+
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Feature importance (XGBoost gain)
 # ---------------------------------------------------------------------------
@@ -426,6 +483,7 @@ def train_xgboost_from_data(
     joblib.dump(calibrated, out_cal)
     out_names.write_text(json.dumps(data.feature_names))
     out_threshold.write_text(json.dumps(asdict(threshold)))
+    segment_models = train_segment_models(data, base_dir=out_model.parent / "horizons")
 
     result = TrainingResult(
         dataset_size=len(data.y),
@@ -443,6 +501,7 @@ def train_xgboost_from_data(
         model_comparison=comparison,
         calibration=cal_metrics,
         decision_threshold=threshold,
+        segment_models=segment_models,
         model_path=str(out_model),
         calibrated_model_path=str(out_cal),
     )
@@ -485,6 +544,11 @@ def print_training_summary(result: TrainingResult) -> None:
     print(f"\nTop SHAP features:")
     for item in result.shap_summary[:10]:
         print(f"  {item['feature']:<45} {float(item['mean_abs_shap']):.6f}")
+
+    if result.segment_models:
+        print(f"\nSegment models:")
+        for item in result.segment_models:
+            print(f"  {item.segment:<8} samples={item.samples:<5} acc={item.accuracy:.4f} threshold={item.threshold:.4f}")
 
     print(f"\nSaved XGBoost model:    {result.model_path}")
     print(f"Saved calibrated model: {result.calibrated_model_path}")

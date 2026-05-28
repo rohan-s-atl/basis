@@ -47,6 +47,13 @@ _ASSET_CLASS_ENCODING = {
     "unknown": 7,
 }
 
+LEAKY_DERIVED_FEATURES = {
+    "historical_accuracy_of_event_type",
+    "rolling_accuracy_of_asset_predictions",
+    "event_asset_avg_return",
+    "event_asset_accuracy",
+}
+
 
 def build_feature_vector(
     event: EventRecord,
@@ -117,11 +124,16 @@ def sentiment_from_classification(classification: dict[str, Any]) -> float:
 
 
 def build_event_features(event: Event) -> dict[str, float | int]:
+    timestamp = event.timestamp
     features: dict[str, float | int] = {
         "event_type_encoded": encode_event_type(event.event_type),
+        "source_encoded": _stable_string_encoding(event.source),
         "sentiment": round(event.sentiment, 4),
         "severity": round(event.severity, 4),
-        "event_timestamp_unix": int(event.timestamp.timestamp()),
+        "event_timestamp_unix": int(timestamp.timestamp()),
+        "event_day_of_week": int(timestamp.weekday()),
+        "event_hour_utc": int(timestamp.hour),
+        "surprise_magnitude": 0.0,
         "text_embedding_norm": 0.0,
         "text_embedding_pos_sim": 0.5,
         "text_embedding_neg_sim": 0.5,
@@ -152,12 +164,18 @@ def build_market_features(
     history: list[float] | None = None,
     sector_return_5d: float | None = None,
     sector_return_10d: float | None = None,
+    beta_to_spy: float = 1.0,
+    volume_ratio: float = 1.0,
+    dollar_trend: float = 0.0,
+    oil_trend: float = 0.0,
+    spy_return_20d: float = 0.0,
 ) -> dict[str, float | int]:
     clean_history = [float(value) for value in history or [] if value is not None]
     asset_class = asset_class_for_symbol(asset)
     rolling_volatility = _rolling_volatility(clean_history, window=5)
     return_5d = _return_over_period(clean_history, 5)
     return_10d = _return_over_period(clean_history, 10)
+    return_20d = _return_over_period(clean_history, 20)
     effective_sector_return_5d = return_5d if sector_return_5d is None else sector_return_5d
     effective_sector_return_10d = return_10d if sector_return_10d is None else sector_return_10d
     return {
@@ -167,11 +185,18 @@ def build_market_features(
         "return_1d": round(_return_over_period(clean_history, 1), 6),
         "return_5d": round(return_5d, 6),
         "return_10d": round(return_10d, 6),
+        "return_20d": round(return_20d, 6),
+        "spy_return_20d": round(spy_return_20d, 6),
         "sector_return_5d": round(effective_sector_return_5d, 6),
         "sector_return_10d": round(effective_sector_return_10d, 6),
         "relative_strength_5d": round(return_5d - effective_sector_return_5d, 6),
         "rolling_volatility": round(rolling_volatility, 6),
         "volatility": round(rolling_volatility, 6),
+        "asset_momentum_20d": round(return_20d, 6),
+        "asset_beta_to_spy": round(beta_to_spy, 6),
+        "volume_ratio": round(volume_ratio, 6),
+        "dollar_trend": round(dollar_trend, 6),
+        "oil_trend": round(oil_trend, 6),
         "history_points": len(clean_history),
     }
 
@@ -192,6 +217,8 @@ def build_derived_features(
     spy_trend: float = 0.0,
     rate_level: float = 4.0,
     market_regime_encoded: int = 1,
+    asset_exposure_sign: float = 1.0,
+    asset_exposure_confidence: float = 0.5,
 ) -> dict[str, float | int]:
     sentiment = float(event_features.get("sentiment", 0.0))
     severity = float(event_features.get("severity", 0.0))
@@ -214,6 +241,11 @@ def build_derived_features(
         "spy_trend": round(spy_trend, 6),
         "rate_level": round(rate_level, 4),
         "market_regime_encoded": market_regime_encoded,
+        "asset_exposure_sign": round(asset_exposure_sign, 4),
+        "asset_exposure_confidence": round(asset_exposure_confidence, 4),
+        "recent_macro_cluster_count": 0,
+        "repeated_event_type": 0,
+        "event_novelty": 1.0,
     }
 
 
@@ -229,6 +261,8 @@ def flatten_feature_snapshot(
         ("derived", derived_features),
     ):
         for key, value in values.items():
+            if prefix == "derived" and key in LEAKY_DERIVED_FEATURES:
+                continue
             if not isinstance(value, (int, float, bool)):
                 continue
             flattened[f"{prefix}_{key}"] = _numeric_feature_value(value)
@@ -345,6 +379,11 @@ def _numeric_feature_value(value: Any) -> float | int:
             return 0.0
         return value
     return 0.0
+
+
+def _stable_string_encoding(value: str | None) -> int:
+    text = str(value or "unknown").lower()
+    return sum((index + 1) * ord(char) for index, char in enumerate(text)) % 10_000
 
 
 def _clamp(value: float, lower: float, upper: float) -> float:

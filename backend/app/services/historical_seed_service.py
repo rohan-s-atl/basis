@@ -20,7 +20,7 @@ from app.services.feature_service import (
 )
 from app.services.historical_market_service import HORIZONS, fetch_price_window
 from app.services.historical_market_service import fetch_historical_regime
-from app.services.outcome_label_service import benchmark_metrics, directional_label, return_bucket
+from app.services.outcome_label_service import benchmark_metrics, market_direction_label, return_bucket
 
 
 @dataclass(frozen=True)
@@ -87,6 +87,7 @@ def seed_historical_training_data(
                         asset=symbol,
                         price=window.entry_price,
                         history=window.pre_event_history,
+                        spy_return_20d=regime.spy_trend,
                     )
                     baseline = score_baseline_prediction(
                         sentiment=float(event_features["sentiment"]),
@@ -331,8 +332,7 @@ def _create_missing_outcomes(
             continue
         exit_price = future_closes[horizon]
         raw_return = (exit_price - entry_price) / entry_price
-        label = directional_label(
-            prediction.predicted_direction,
+        label = market_direction_label(
             raw_return,
             noise_threshold=threshold,
         )
@@ -344,7 +344,6 @@ def _create_missing_outcomes(
             raw_return=raw_return,
         )
         benchmark = benchmark_metrics(
-            predicted_direction=prediction.predicted_direction,
             raw_return=raw_return,
             benchmark_return=benchmark_return,
             noise_threshold=threshold,

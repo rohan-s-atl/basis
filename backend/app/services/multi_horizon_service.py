@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.db.models import FeatureSnapshot, MultiHorizonOutcome, Prediction
 from app.db.session import SessionLocal
-from app.services.outcome_label_service import benchmark_metrics, directional_label, return_bucket
+from app.services.outcome_label_service import benchmark_metrics, market_direction_label, return_bucket
 
 logger = logging.getLogger(__name__)
 
@@ -82,8 +82,7 @@ def compute_multi_horizon_outcomes(
                         continue
 
                     raw_return = (exit_price - entry_price) / entry_price
-                    label = directional_label(
-                        pred.predicted_direction,
+                    label = market_direction_label(
                         raw_return,
                         noise_threshold=threshold,
                     )
@@ -95,7 +94,6 @@ def compute_multi_horizon_outcomes(
                         raw_return=raw_return,
                     )
                     benchmark = benchmark_metrics(
-                        predicted_direction=pred.predicted_direction,
                         raw_return=raw_return,
                         benchmark_return=benchmark_return,
                         noise_threshold=threshold,

@@ -12,9 +12,29 @@ def return_bucket(raw_return: float) -> str:
     return "large"
 
 
+def market_direction_label(value: float, *, noise_threshold: float) -> int | None:
+    """Label the realized market outcome itself: 1 means up/outperform, 0 means down/underperform."""
+    value = float(value)
+    if abs(value) < noise_threshold:
+        return None
+    return 1 if value > 0 else 0
+
+
+def prediction_correct_label(
+    predicted_direction: str,
+    value: float,
+    *,
+    noise_threshold: float,
+) -> int | None:
+    return _directional_label(
+        predicted_direction,
+        value,
+        noise_threshold=noise_threshold,
+    )
+
+
 def benchmark_metrics(
     *,
-    predicted_direction: str,
     raw_return: float,
     benchmark_return: float | None,
     noise_threshold: float,
@@ -27,11 +47,7 @@ def benchmark_metrics(
         }
 
     excess_return = float(raw_return) - float(benchmark_return)
-    label = _directional_label(
-        predicted_direction,
-        excess_return,
-        noise_threshold=noise_threshold,
-    )
+    label = market_direction_label(excess_return, noise_threshold=noise_threshold)
     return {
         "benchmark_return": round(float(benchmark_return), 8),
         "excess_return": round(excess_return, 8),
@@ -45,7 +61,7 @@ def directional_label(
     *,
     noise_threshold: float,
 ) -> int | None:
-    return _directional_label(
+    return prediction_correct_label(
         predicted_direction,
         raw_return,
         noise_threshold=noise_threshold,

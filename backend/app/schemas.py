@@ -194,10 +194,16 @@ class AssetPrediction(BaseModel):
     ranking_score: float
     is_actionable: bool
     filter_reason: str | None
+    actionability: str = "watch"
+    confidence_tier: str = "low"
     horizon: str
     expected_move_pct: float
     expected_move_low_pct: float
     expected_move_high_pct: float
+    expected_excess_return_pct: float = 0.0
+    why_this_matters: str = ""
+    risk_factors: list[str] = Field(default_factory=list)
+    gate_status: dict[str, str | bool | None] = Field(default_factory=dict)
     bull_case: str
     base_case: str
     bear_case: str
@@ -221,6 +227,7 @@ class TrainingDatasetMetadata(BaseModel):
     num_samples: int
     class_balance: dict[str, float | int]
     feature_count: int
+    target: str | None = None
 
 
 class TrainingDataset(BaseModel):

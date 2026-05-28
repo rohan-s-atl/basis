@@ -2,10 +2,12 @@ import json
 
 from sqlalchemy.orm import Session
 
-from app.db.models import EventRecord, FeatureSnapshot, Prediction
+from app.db.models import Event, EventRecord, FeatureSnapshot, MultiHorizonOutcome, Outcome, Prediction
 from app.repositories.event_repository import list_recent_events
 from app.services.feature_service import build_feature_vector, score_signal_quality
 from app.services.ml_scorer import explain_prediction
+from app.services.training_run_service import get_model_health
+from app.services.mapping_service import asset_exposure_for
 
 _SEVERITY_MOVE = {
     "low": 0.35,
@@ -77,6 +79,10 @@ def generate_predictions(
                 sectors=sectors,
             )
             probability = score_signal_quality(features)
+            exposure = asset_exposure_for(symbol, {
+                "event_type": event.event_type,
+                "affected_sectors": sectors,
+            })
             move_mid = _expected_move(event, float(features["asset_specificity"]))
             ranking_score = _ranking_score(
                 probability=probability,
@@ -93,13 +99,16 @@ def generate_predictions(
                 confidence=event.confidence,
                 expected_move=move_mid,
                 min_quality=min_quality,
+                segment_quality_reason=_segment_quality_reason(db, symbol, event.event_type, horizon),
+                drift_reason=_drift_reason(db),
             )
             if filter_reason and not include_weak:
                 weak_filtered += 1
                 continue
-            direction_multiplier = -1 if event.impact_direction == "negative" else 1
+            direction_multiplier = _direction_multiplier(event.impact_direction) * float(exposure["sign"])
             if event.impact_direction == "neutral":
                 direction_multiplier = 0
+            impact_direction = "positive" if direction_multiplier > 0 else "negative" if direction_multiplier < 0 else "neutral"
 
             predictions.append(
                 {
@@ -107,17 +116,23 @@ def generate_predictions(
                     "title": event.title,
                     "event_type": event.event_type,
                     "affected_sectors": sectors,
-                    "impact_direction": event.impact_direction,
+                    "impact_direction": impact_direction,
                     "severity": event.severity,
                     "confidence": event.confidence,
                     "probability": probability,
                     "ranking_score": ranking_score,
                     "is_actionable": filter_reason is None,
                     "filter_reason": filter_reason,
+                    "actionability": _actionability(filter_reason),
+                    "confidence_tier": _confidence_tier(probability),
                     "horizon": horizon,
                     "expected_move_pct": round(move_mid * direction_multiplier, 2),
                     "expected_move_low_pct": round(max(0.1, move_mid * 0.55) * direction_multiplier, 2),
                     "expected_move_high_pct": round(move_mid * 1.55 * direction_multiplier, 2),
+                    "expected_excess_return_pct": round(move_mid * direction_multiplier * 0.45, 2),
+                    "why_this_matters": _why_this_matters(event.event_type, symbol, str(exposure["rationale"])),
+                    "risk_factors": _risk_factors(filter_reason, event.event_type),
+                    "gate_status": _gate_status(filter_reason),
                     "bull_case": _scenario_text(event, symbol, "bull"),
                     "base_case": _scenario_text(event, symbol, "base"),
                     "bear_case": _scenario_text(event, symbol, "bear"),
@@ -175,6 +190,13 @@ def _stored_ml_predictions(db: Session, limit: int, min_quality: float) -> list[
             confidence=confidence,
             expected_move=expected_move,
             min_quality=min_quality,
+            segment_quality_reason=_segment_quality_reason(
+                db,
+                prediction.asset,
+                event.event_type if event is not None else "general_market",
+                prediction.horizon,
+            ),
+            drift_reason=_drift_reason(db),
         )
         shap = explain_prediction(
             snapshot.event_features,
@@ -194,10 +216,20 @@ def _stored_ml_predictions(db: Session, limit: int, min_quality: float) -> list[
             "ranking_score": ranking_score,
             "is_actionable": filter_reason is None,
             "filter_reason": filter_reason,
+            "actionability": _actionability(filter_reason),
+            "confidence_tier": _confidence_tier(confidence),
             "horizon": prediction.horizon,
             "expected_move_pct": round(signed_move, 2),
             "expected_move_low_pct": round(signed_move * 0.55, 2),
             "expected_move_high_pct": round(signed_move * 1.55, 2),
+            "expected_excess_return_pct": round(signed_move * 0.45, 2),
+            "why_this_matters": _why_this_matters(
+                event.event_type if event is not None else "general_market",
+                prediction.asset,
+                "stored ML signal",
+            ),
+            "risk_factors": _risk_factors(filter_reason, event.event_type if event is not None else "general_market"),
+            "gate_status": _gate_status(filter_reason),
             "bull_case": _stored_scenario(prediction.asset, direction, "bull"),
             "base_case": f"{prediction.asset} follows the stored {prediction.horizon} ML signal.",
             "bear_case": _stored_scenario(prediction.asset, direction, "bear"),
@@ -280,7 +312,11 @@ def _filter_reason(
     confidence: float,
     expected_move: float,
     min_quality: float,
+    segment_quality_reason: str | None = None,
+    drift_reason: str | None = None,
 ) -> str | None:
+    if drift_reason is not None:
+        return drift_reason
     segment_reason = _segment_filter_reason(
         symbol=symbol,
         event_type=event_type,
@@ -288,6 +324,8 @@ def _filter_reason(
     )
     if segment_reason is not None:
         return segment_reason
+    if segment_quality_reason is not None:
+        return segment_quality_reason
     if probability < min_quality:
         return "low_quality"
     if confidence < 0.55:
@@ -295,6 +333,137 @@ def _filter_reason(
     if abs(expected_move) < 0.25:
         return "small_expected_move"
     return None
+
+
+def _direction_multiplier(direction: str) -> float:
+    if direction == "positive":
+        return 1.0
+    if direction == "negative":
+        return -1.0
+    return 0.0
+
+
+def _actionability(filter_reason: str | None) -> str:
+    if filter_reason is None:
+        return "actionable"
+    if filter_reason in {"small_expected_move", "low_quality", "low_confidence"}:
+        return "watch"
+    return "blocked"
+
+
+def _confidence_tier(probability: float) -> str:
+    if probability >= 0.75:
+        return "high"
+    if probability >= 0.62:
+        return "medium"
+    return "low"
+
+
+def _gate_status(filter_reason: str | None) -> dict[str, str | bool | None]:
+    return {
+        "passed": filter_reason is None,
+        "reason": filter_reason,
+    }
+
+
+def _why_this_matters(event_type: str, symbol: str, exposure_rationale: str) -> str:
+    return f"{symbol} is linked to {event_type.replace('_', ' ')} through {exposure_rationale}."
+
+
+def _risk_factors(filter_reason: str | None, event_type: str) -> list[str]:
+    risks: list[str] = []
+    if filter_reason is not None:
+        risks.append(filter_reason.replace("_", " "))
+    if event_type in {"geopolitical_conflict", "supply_shock"}:
+        risks.append("headline reversal risk")
+    if event_type in {"inflation", "interest_rate_change"}:
+        risks.append("rates repricing risk")
+    return risks or ["model uncertainty", "market regime shift"]
+
+
+def _drift_reason(db: Session) -> str | None:
+    try:
+        health = get_model_health(db)
+    except Exception:
+        return None
+    confidence = health.get("confidence_drift") or {}
+    if health.get("drift_detected") and float(confidence.get("psi", 0.0)) >= 0.35:
+        return "severe_drift"
+    return None
+
+
+def _segment_quality_reason(db: Session, symbol: str, event_type: str, horizon: str) -> str | None:
+    rows = _segment_label_rows(db, symbol=symbol, event_type=event_type, horizon_days=_horizon_days(horizon))
+    if len(rows) < 8:
+        return None
+
+    model_acc = sum(_direction_matches_label(direction, label) for direction, label in rows) / len(rows)
+    always_up = sum(1 for _, label in rows if label == 1) / len(rows)
+    always_down = 1.0 - always_up
+    best_baseline = max(always_up, always_down)
+
+    if model_acc <= best_baseline:
+        return "segment_not_beating_baseline"
+    if max(always_up, always_down) < 0.58:
+        return "contradictory_history"
+    return None
+
+
+def _segment_label_rows(
+    db: Session,
+    *,
+    symbol: str,
+    event_type: str,
+    horizon_days: int | None,
+) -> list[tuple[str, int]]:
+    symbol = symbol.upper()
+    multi = (
+        db.query(Prediction.predicted_direction, MultiHorizonOutcome.benchmark_label, MultiHorizonOutcome.label)
+        .join(Event, Event.id == Prediction.event_id)
+        .join(MultiHorizonOutcome, MultiHorizonOutcome.prediction_id == Prediction.id)
+        .filter(
+            Prediction.asset == symbol,
+            Event.event_type == event_type,
+            MultiHorizonOutcome.benchmark_label.isnot(None) | MultiHorizonOutcome.label.isnot(None),
+        )
+    )
+    if horizon_days is not None:
+        multi = multi.filter(MultiHorizonOutcome.horizon_days == horizon_days)
+
+    multi_rows = [
+        (direction, _target_label(benchmark_label, label))
+        for direction, benchmark_label, label in multi.limit(100).all()
+    ]
+    if multi_rows:
+        return multi_rows
+
+    single = (
+        db.query(Prediction.predicted_direction, Outcome.benchmark_label, Outcome.label)
+        .join(Event, Event.id == Prediction.event_id)
+        .join(Outcome, Outcome.prediction_id == Prediction.id)
+        .filter(
+            Prediction.asset == symbol,
+            Event.event_type == event_type,
+            Outcome.benchmark_label.isnot(None) | Outcome.label.isnot(None),
+        )
+        .limit(100)
+        .all()
+    )
+    return [
+        (direction, _target_label(benchmark_label, label))
+        for direction, benchmark_label, label in single
+    ]
+
+
+def _target_label(benchmark_label: int | None, raw_label: int | None) -> int:
+    label = benchmark_label if benchmark_label is not None else raw_label
+    if label is None:
+        raise ValueError("segment row missing outcome label")
+    return int(label)
+
+
+def _direction_matches_label(direction: str, label: int) -> int:
+    return int((direction == "up" and label == 1) or (direction == "down" and label == 0))
 
 
 def _segment_filter_reason(

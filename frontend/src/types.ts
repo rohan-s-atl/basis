@@ -209,10 +209,19 @@ export type AssetPrediction = {
   ranking_score: number;
   is_actionable: boolean;
   filter_reason: string | null;
+  actionability: "actionable" | "watch" | "blocked";
+  confidence_tier: "low" | "medium" | "high";
   horizon: string;
   expected_move_pct: number;
   expected_move_low_pct: number;
   expected_move_high_pct: number;
+  expected_excess_return_pct: number;
+  why_this_matters: string;
+  risk_factors: string[];
+  gate_status: {
+    passed: boolean;
+    reason: string | null;
+  };
   bull_case: string;
   base_case: string;
   bear_case: string;

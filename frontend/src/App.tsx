@@ -102,13 +102,13 @@ type SearchResult = {
 };
 
 const navItems = [
-  { route: "#/", label: "Overview", icon: Activity },
-  { route: "#/events", label: "Events", icon: FileText },
-  { route: "#/assets", label: "Assets", icon: BriefcaseBusiness },
-  { route: "#/predictions", label: "Predictions", icon: Target },
-  { route: "#/portfolio", label: "My Portfolio", icon: LineChart },
-  { route: "#/ml", label: "Model", icon: BrainCircuit },
-  { route: "#/data", label: "System Health", icon: Database },
+  { route: "#/", label: "Command", icon: Activity },
+  { route: "#/predictions", label: "Signals", icon: Target },
+  { route: "#/portfolio", label: "Holdings", icon: BriefcaseBusiness },
+  { route: "#/events", label: "Market Feed", icon: FileText },
+  { route: "#/assets", label: "Assets", icon: LineChart },
+  { route: "#/ml", label: "Diagnostics", icon: BrainCircuit },
+  { route: "#/data", label: "Data Health", icon: Database },
 ];
 
 function parseRoute(): Route {
@@ -141,6 +141,19 @@ function sortEvents(a: EventRecord, b: EventRecord, sort: string): number {
   if (sort === "direction") return a.impact_direction.localeCompare(b.impact_direction);
   if (sort === "type") return a.event_type.localeCompare(b.event_type);
   return severityValue(b.severity) - severityValue(a.severity);
+}
+
+function BasisLogo({ compact = false }: { compact?: boolean }) {
+  const size = compact ? "h-8 w-8" : "h-10 w-10";
+  return (
+    <div className={`${size} grid place-items-center rounded-lg border border-quant-line bg-white/70 shadow-sm backdrop-blur-xl`}>
+      <svg viewBox="0 0 40 40" className="h-7 w-7" role="img" aria-label="Basis">
+        <path d="M9 28V11h11c3.8 0 6.2 2 6.2 5.1 0 1.8-.8 3.2-2.4 4.1 2.1.7 3.3 2.1 3.3 4.1 0 3.4-2.6 5.7-6.8 5.7H9Zm5.2-10.3h5.2c1.2 0 1.9-.6 1.9-1.6s-.7-1.6-1.9-1.6h-5.2v3.2Zm0 7.8h5.9c1.4 0 2.2-.7 2.2-1.8s-.8-1.8-2.2-1.8h-5.9v3.6Z" fill="#17211D" />
+        <path d="M8.5 33c6.7-1.2 15.1-1.2 22 0" fill="none" stroke="#1F7A5C" strokeWidth="2.5" strokeLinecap="round" />
+        <path d="M29.5 9.5 34 5" stroke="#2F5F8F" strokeWidth="2.5" strokeLinecap="round" />
+      </svg>
+    </div>
+  );
 }
 
 function App() {
@@ -218,9 +231,9 @@ function App() {
   }, [holdingsText]);
 
   useEffect(() => {
-    if (assetRows.length === 0) return;
+    if (assetRows.length === 0 && holdingSymbols.length === 0) return;
     let isMounted = true;
-    const symbols = assetRows.slice(0, 16).map((row) => row.symbol);
+    const symbols = Array.from(new Set([...holdingSymbols, ...assetRows.slice(0, 16).map((row) => row.symbol)])).slice(0, 28);
 
     async function updateQuotes() {
       const results = await Promise.allSettled(symbols.map((symbol) => fetchMarketPrice(symbol)));
@@ -243,7 +256,7 @@ function App() {
       isMounted = false;
       window.clearInterval(intervalId);
     };
-  }, [assetRows]);
+  }, [assetRows, holdingSymbols]);
 
   async function loadAll() {
     setIsLoading(true);
@@ -300,18 +313,17 @@ function App() {
   const sampleProgress = Math.min(100, (sampleCount / 300) * 100);
   const regimeLabel = appData.marketRegime ? regimeName(appData.marketRegime.market_regime_encoded) : "Regime pending";
   const sidebarAction = sidebarNextAction(appData, apiStatus);
+  const topSignal = appData.predictions?.predictions[0] ?? null;
 
   return (
     <main className="min-h-screen bg-quant-bg text-quant-text">
       <div className="relative z-10 flex min-h-screen">
-        <aside className="scrollbar-quant sticky top-0 hidden h-screen w-64 shrink-0 overflow-y-auto border-r border-quant-line bg-quant-bg/92 px-4 py-5 backdrop-blur-xl lg:block">
+        <aside className="scrollbar-quant sticky top-0 hidden h-screen w-72 shrink-0 overflow-y-auto border-r border-white/45 bg-white/38 px-4 py-5 shadow-panel backdrop-blur-2xl lg:block">
           <button onClick={() => go("#/")} className="mb-7 flex w-full items-center gap-3 text-left">
-            <div className="grid h-10 w-10 place-items-center rounded-lg border border-quant-green/40 bg-quant-green/10 text-quant-green">
-              <BrainCircuit size={21} />
-            </div>
+            <BasisLogo />
             <div>
               <h1 className="text-2xl font-black leading-tight text-quant-text">Basis</h1>
-              <p className="mt-0.5 text-[0.68rem] font-bold uppercase tracking-[0.18em] text-quant-muted">Market intelligence</p>
+              <p className="mt-0.5 text-[0.68rem] font-bold uppercase text-quant-muted">Investor command</p>
             </div>
           </button>
 
@@ -325,8 +337,8 @@ function App() {
                   onClick={() => go(item.route)}
                   className={`flex h-10 items-center gap-3 rounded-md px-3 text-sm font-bold transition ${
                     isActive
-                      ? "bg-quant-green/12 text-quant-green"
-                      : "text-quant-muted hover:bg-quant-panel2 hover:text-quant-text"
+                      ? "border border-quant-line bg-white/65 text-quant-text shadow-sm"
+                      : "text-quant-muted hover:bg-white/40 hover:text-quant-text"
                   }`}
                 >
                   <Icon size={16} />
@@ -336,39 +348,54 @@ function App() {
             })}
           </nav>
 
-          <div className="mt-6 rounded-lg border border-quant-line bg-quant-panel2 p-3">
-            <p className="quant-eyebrow mb-2">System</p>
+          <div className="mt-6 rounded-lg border border-quant-line bg-white/50 p-3 backdrop-blur-xl">
+            <p className="quant-eyebrow mb-2">Status</p>
             <div className={`mb-2 flex items-center gap-2 text-sm font-black ${apiStatus === "live" ? "text-quant-green" : apiStatus === "error" ? "text-quant-red" : "text-quant-yellow"}`}>
               <Waves size={15} />
-              {apiStatus === "live" ? "Live API" : apiStatus === "error" ? "API issue" : "Connecting"}
+              {apiStatus === "live" ? "Live market feed" : apiStatus === "error" ? "Connection issue" : "Connecting"}
             </div>
             <p className="truncate text-xs text-quant-muted">{apiBaseUrl}</p>
             <p className="mt-1 text-xs text-quant-muted">Updated {lastUpdated}</p>
           </div>
 
           <div className="mt-4 grid gap-3">
-            <div className="rounded-lg border border-quant-line bg-quant-panel2 p-3">
+            <div className="rounded-lg border border-quant-line bg-white/50 p-3 backdrop-blur-xl">
               <div className="mb-3 flex items-center justify-between gap-2">
-                <p className="quant-eyebrow">Pulse</p>
+                <p className="quant-eyebrow">Today</p>
                 <span className={`text-[0.65rem] font-black uppercase ${apiStatus === "live" ? "text-quant-green" : "text-quant-yellow"}`}>
                   {apiStatus === "live" ? "Online" : "Standby"}
                 </span>
               </div>
               <div className="grid grid-cols-2 gap-2">
+                <SidebarMetric label="Signals" value={(appData.predictions?.count ?? 0).toString()} />
+                <SidebarMetric label="Watch" value={holdingSymbols.length.toString()} />
                 <SidebarMetric label="Events" value={events.length.toString()} />
-                <SidebarMetric label="High" value={highImpactCount.toString()} tone={highImpactCount > 0 ? "red" : "muted"} />
-                <SidebarMetric label="Assets" value={linkedAssetCount.toString()} />
-                <SidebarMetric label="Alerts" value={alerts.length.toString()} tone={alerts.length > 0 ? "yellow" : "muted"} />
+                <SidebarMetric label="Risk" value={highImpactCount.toString()} tone={highImpactCount > 0 ? "red" : "muted"} />
               </div>
             </div>
+
+            {topSignal && (
+              <button
+                type="button"
+                onClick={() => go("#/predictions/0")}
+                className="rounded-lg border border-quant-line bg-white/55 p-3 text-left shadow-sm backdrop-blur-xl transition hover:border-quant-blue/30"
+              >
+                <p className="quant-eyebrow mb-2">Top signal</p>
+                <div className="flex items-center justify-between gap-2">
+                  <strong className="text-lg font-black text-quant-text">{topSignal.symbol}</strong>
+                  <span className={directionColor(topSignal.impact_direction)}>{topSignal.expected_move_pct}%</span>
+                </div>
+                <p className="mt-1 line-clamp-2 text-xs leading-5 text-quant-muted">{topSignal.why_this_matters || topSignal.title}</p>
+              </button>
+            )}
 
             <button
               type="button"
               onClick={() => go("#/ml")}
-              className="rounded-lg border border-quant-line bg-quant-panel2 p-3 text-left transition hover:border-quant-green/50"
+              className="rounded-lg border border-quant-line bg-white/50 p-3 text-left backdrop-blur-xl transition hover:border-quant-blue/30"
             >
               <div className="mb-3 flex items-center justify-between gap-2">
-                <p className="quant-eyebrow">Model</p>
+                <p className="quant-eyebrow">Reliability</p>
                 <span className={appData.modelHealth?.drift_detected ? "text-[0.65rem] font-black uppercase text-quant-red" : "text-[0.65rem] font-black uppercase text-quant-green"}>
                   {appData.modelHealth?.drift_detected ? "Drift" : "Stable"}
                 </span>
@@ -380,15 +407,13 @@ function App() {
               <div className="h-1.5 overflow-hidden rounded-full bg-quant-bg">
                 <div className="h-full rounded-full bg-gradient-to-r from-quant-green to-quant-blue" style={{ width: `${sampleProgress}%` }} />
               </div>
-              <p className="mt-2 text-xs leading-5 text-quant-muted">
-                {sampleCount < 300 ? "Learning window active" : "Credibility target reached"}
-              </p>
+              <p className="mt-2 text-xs leading-5 text-quant-muted">{sampleCount < 300 ? "Still learning from outcomes" : "Sample target reached"}</p>
             </button>
 
             <button
               type="button"
               onClick={() => go("#/regime")}
-              className="rounded-lg border border-quant-line bg-quant-panel2 p-3 text-left transition hover:border-quant-green/50"
+              className="rounded-lg border border-quant-line bg-white/50 p-3 text-left backdrop-blur-xl transition hover:border-quant-blue/30"
             >
               <div className="mb-3 flex items-center justify-between gap-2">
                 <p className="quant-eyebrow">Market State</p>
@@ -403,20 +428,16 @@ function App() {
               </div>
             </button>
 
-            <button
-              type="button"
-              onClick={() => go(sidebarAction.route)}
-              className="rounded-lg border border-quant-green/30 bg-quant-green/8 p-3 text-left transition hover:border-quant-green/60"
-            >
+            <button type="button" onClick={() => go(sidebarAction.route)} className="rounded-lg border border-quant-blue/20 bg-white/55 p-3 text-left shadow-sm backdrop-blur-xl transition hover:border-quant-blue/40">
               <p className="quant-eyebrow mb-2">Next Action</p>
-              <p className="text-sm font-black text-quant-green">{sidebarAction.title}</p>
+              <p className="text-sm font-black text-quant-blue">{sidebarAction.title}</p>
               <p className="mt-1 text-xs leading-5 text-quant-muted">{sidebarAction.detail}</p>
             </button>
           </div>
         </aside>
 
         <section className="flex min-w-0 flex-1 flex-col">
-          <header className="sticky top-0 z-20 border-b border-quant-line bg-quant-bg/88 px-4 py-3 backdrop-blur-xl lg:px-7">
+          <header className="sticky top-0 z-20 border-b border-white/45 bg-white/35 px-4 py-3 shadow-sm backdrop-blur-2xl lg:px-7">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="min-w-0">
                 <Breadcrumbs route={route} />
@@ -588,23 +609,73 @@ function OverviewPage({
 }) {
   const highImpact = events.filter((event) => ["high", "critical"].includes(event.severity ?? "low")).length;
   const earlyModel = (appData.trainingStats?.num_samples ?? 0) < 300;
+  const signals = appData.predictions?.predictions ?? [];
+  const actionable = signals.filter((signal) => signal.actionability === "actionable" || signal.is_actionable);
+  const watched = signals.filter((signal) => signal.actionability === "watch");
+  const blocked = signals.filter((signal) => signal.actionability === "blocked" || (!signal.is_actionable && signal.actionability !== "watch"));
+  const leadSignal = actionable[0] ?? signals[0] ?? null;
   return (
     <div className="grid gap-5">
+      <section className="quant-panel-strong overflow-hidden p-5 lg:p-7">
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
+          <div>
+            <p className="quant-eyebrow mb-3">Market decision layer</p>
+            <h2 className="max-w-4xl text-4xl font-black leading-tight text-quant-text md:text-5xl">
+              {leadSignal ? `${leadSignal.symbol}: ${formatInvestorDirection(leadSignal.impact_direction)} signal` : "Your macro watch floor is ready"}
+            </h2>
+            <p className="mt-4 max-w-2xl text-base leading-7 text-quant-muted">
+              {leadSignal
+                ? leadSignal.why_this_matters || leadSignal.title
+                : "Add holdings, monitor macro events, and review investor-ready signals without digging through model internals."}
+            </p>
+            <div className="mt-6 flex flex-wrap gap-2">
+              <button onClick={() => go("#/predictions")} className="quant-button bg-quant-text text-white hover:bg-quant-text/90">Review signals</button>
+              <button onClick={() => go("#/portfolio")} className="quant-button">Watch my holdings</button>
+              <button onClick={() => go("#/events")} className="quant-button">Open market feed</button>
+            </div>
+          </div>
+          <div className="rounded-lg border border-quant-line bg-white/45 p-4 backdrop-blur-2xl">
+            {leadSignal ? (
+              <SignalBriefCard prediction={leadSignal} index={signals.indexOf(leadSignal)} featured />
+            ) : (
+              <InlineEmpty title="No signals loaded" description="Refresh the feed or wait for predictions to populate the command view." />
+            )}
+          </div>
+        </div>
+      </section>
+
       <div className="grid gap-3 md:grid-cols-4">
-        <MetricCard label="Events" value={events.length.toString()} icon={FileText} onClick={() => go("#/events")} />
-        <MetricCard label="High impact" value={highImpact.toString()} icon={Gauge} onClick={() => go("#/events")} />
-        <MetricCard label="Assets" value={assetRows.length.toString()} icon={BriefcaseBusiness} onClick={() => go("#/assets")} />
-        <MetricCard label="Labeled samples" value={appData.trainingStats?.num_samples.toString() ?? "--"} icon={Database} onClick={() => go("#/data")} />
+        <MetricCard label="Actionable" value={actionable.length.toString()} icon={Target} onClick={() => go("#/predictions")} />
+        <MetricCard label="Watch" value={watched.length.toString()} icon={Gauge} onClick={() => go("#/predictions")} />
+        <MetricCard label="Blocked" value={blocked.length.toString()} icon={Database} onClick={() => go("#/predictions")} />
+        <MetricCard label="High impact" value={highImpact.toString()} icon={FileText} onClick={() => go("#/events")} />
       </div>
+
+      <section className="quant-panel p-4">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <div>
+            <p className="quant-eyebrow">Signal queue</p>
+            <h3 className="text-xl font-black text-quant-text">What deserves attention</h3>
+          </div>
+          <button onClick={() => go("#/predictions")} className="quant-button">All signals</button>
+        </div>
+        <div className="grid gap-3 xl:grid-cols-3">
+          {signals.length === 0 ? (
+            <InlineEmpty title="No predictions yet" description="Signals appear here once Basis has classified events and mapped assets." />
+          ) : signals.slice(0, 6).map((prediction, index) => (
+            <SignalBriefCard key={`${prediction.symbol}-${index}`} prediction={prediction} index={index} />
+          ))}
+        </div>
+      </section>
 
       <div className="grid gap-5 xl:grid-cols-[1fr_0.8fr_0.8fr]">
         <section className="quant-panel p-4">
           <div className="mb-4 flex items-center justify-between">
             <div>
-              <p className="quant-eyebrow">Priority Feed</p>
-              <h3 className="text-lg font-black text-quant-text">Latest macro risks</h3>
+              <p className="quant-eyebrow">Market feed</p>
+              <h3 className="text-lg font-black text-quant-text">Latest catalysts</h3>
             </div>
-            <button onClick={() => go("#/events")} className="text-xs font-black text-quant-green">Open events</button>
+            <button onClick={() => go("#/events")} className="text-xs font-black text-quant-blue">Open feed</button>
           </div>
           <div className="grid gap-2">
             {events.length === 0 ? (
@@ -616,10 +687,10 @@ function OverviewPage({
         <section className="quant-panel p-4">
           <div className="mb-4 flex items-center justify-between">
             <div>
-              <p className="quant-eyebrow">Portfolio</p>
-              <h3 className="text-lg font-black text-quant-text">Signal curve</h3>
+              <p className="quant-eyebrow">Holdings</p>
+              <h3 className="text-lg font-black text-quant-text">Strategy curve</h3>
             </div>
-            <button onClick={() => go("#/portfolio")} className="text-xs font-black text-quant-green">Open portfolio</button>
+            <button onClick={() => go("#/portfolio")} className="text-xs font-black text-quant-blue">Open holdings</button>
           </div>
           <MiniReturnPanel portfolio={appData.portfolio} />
         </section>
@@ -629,7 +700,7 @@ function OverviewPage({
               <p className="quant-eyebrow">Market regime</p>
               <h3 className="text-lg font-black text-quant-text">Current context</h3>
             </div>
-            <button onClick={() => go("#/regime")} className="text-xs font-black text-quant-green">Open regime</button>
+            <button onClick={() => go("#/regime")} className="text-xs font-black text-quant-blue">Open regime</button>
           </div>
           <RegimeSummary regime={appData.marketRegime} />
           <p className="mt-3 text-sm leading-6 text-quant-muted">Regime data gives each forecast context for whether the market is risk-on, neutral, or risk-off.</p>
@@ -640,10 +711,10 @@ function OverviewPage({
         <section className="quant-panel p-4 xl:col-span-2">
           <div className="mb-3 flex items-center justify-between">
             <div>
-              <p className="quant-eyebrow">Situations</p>
-              <h3 className="text-lg font-black text-quant-text">Event clusters</h3>
+              <p className="quant-eyebrow">Themes</p>
+              <h3 className="text-lg font-black text-quant-text">Macro clusters</h3>
             </div>
-            <button onClick={() => go("#/events")} className="text-xs font-black text-quant-green">Investigate</button>
+            <button onClick={() => go("#/events")} className="text-xs font-black text-quant-blue">Investigate</button>
           </div>
           <div className="grid gap-2 md:grid-cols-2">
             {clusters.length === 0 ? (
@@ -1008,6 +1079,7 @@ function PredictionsPage({ summary }: { summary: PredictionSummary | null }) {
   const [horizonFilter, setHorizonFilter] = useState("all");
   const [assetFilter, setAssetFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
+  const [actionFilter, setActionFilter] = useState("all");
   if (!summary) return <PredictionsPanel />;
   const assets = uniqueValues(summary.predictions.map((prediction) => prediction.symbol));
   const horizons = uniqueValues(summary.predictions.map((prediction) => prediction.horizon));
@@ -1015,49 +1087,56 @@ function PredictionsPage({ summary }: { summary: PredictionSummary | null }) {
   const visible = summary.predictions.filter((prediction) =>
     (horizonFilter === "all" || prediction.horizon === horizonFilter) &&
     (assetFilter === "all" || prediction.symbol === assetFilter) &&
-    (typeFilter === "all" || prediction.event_type === typeFilter)
+    (typeFilter === "all" || prediction.event_type === typeFilter) &&
+    (actionFilter === "all" || (prediction.actionability ?? (prediction.is_actionable ? "actionable" : "blocked")) === actionFilter)
   );
+  const actionable = summary.predictions.filter((prediction) => prediction.actionability === "actionable" || prediction.is_actionable).length;
+  const watch = summary.predictions.filter((prediction) => prediction.actionability === "watch").length;
+  const blocked = summary.predictions.filter((prediction) => !prediction.is_actionable && prediction.actionability !== "watch").length;
   return (
-    <section className="quant-panel p-4">
+    <section className="grid gap-5">
+      <div className="quant-panel-strong p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="quant-eyebrow">Signals</p>
+            <h3 className="text-3xl font-black text-quant-text">Investor signal board</h3>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-quant-muted">Signals are grouped by actionability, expected move, and portfolio relevance. Model internals stay available in diagnostics, but the main view focuses on decisions.</p>
+          </div>
+          <span className="quant-tag">{summary.model_version}</span>
+        </div>
+        <div className="mt-5 grid gap-3 md:grid-cols-4">
+          <MetricCard label="Actionable" value={actionable.toString()} icon={Target} onClick={() => setActionFilter("actionable")} />
+          <MetricCard label="Watch" value={watch.toString()} icon={Gauge} onClick={() => setActionFilter("watch")} />
+          <MetricCard label="Blocked" value={blocked.toString()} icon={Database} onClick={() => setActionFilter("blocked")} />
+          <MetricCard label="Total" value={summary.total_considered.toString()} icon={FileText} onClick={() => setActionFilter("all")} />
+        </div>
+      </div>
+      <section className="quant-panel p-4">
       <div className="mb-4 flex items-center justify-between">
         <div>
-          <p className="quant-eyebrow">Predictions</p>
+          <p className="quant-eyebrow">Queue</p>
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-xl font-black text-quant-text">Ranked model forecasts</h3>
+            <h3 className="text-xl font-black text-quant-text">Ranked opportunities and risks</h3>
             <EarlyBadge />
           </div>
-          <p className="mt-1 text-sm text-quant-muted">Inspect these as model case files while the labeled dataset matures.</p>
+          <p className="mt-1 text-sm text-quant-muted">Use filters to narrow by holdings, horizon, catalyst type, or actionability.</p>
         </div>
-        <span className="quant-tag">{summary.model_version}</span>
       </div>
-      <div className="mb-4 grid gap-2 md:grid-cols-3">
+      <div className="mb-4 grid gap-2 md:grid-cols-4">
+        <SelectControl label="Action" value={actionFilter} onChange={setActionFilter} options={["all", "actionable", "watch", "blocked"]} />
         <SelectControl label="Horizon" value={horizonFilter} onChange={setHorizonFilter} options={["all", ...horizons]} />
         <SelectControl label="Asset" value={assetFilter} onChange={setAssetFilter} options={["all", ...assets]} />
         <SelectControl label="Event type" value={typeFilter} onChange={setTypeFilter} options={["all", ...eventTypes]} />
       </div>
-      <div className="grid gap-3">
+      <div className="grid gap-3 xl:grid-cols-2">
         {visible.length === 0 ? (
           <InlineEmpty title="No predictions yet" description="Generate events and predictions, then return to this page." />
         ) : visible.map((prediction) => {
           const index = summary.predictions.indexOf(prediction);
-          return (
-          <button key={`${prediction.symbol}-${index}`} onClick={() => go(`#/predictions/${index}`)} className="grid gap-3 rounded-lg border border-quant-line bg-quant-panel2 p-4 text-left transition hover:border-quant-green/50 md:grid-cols-[120px_1fr_160px]">
-            <div>
-              <strong className="text-2xl font-black text-quant-text">{prediction.symbol}</strong>
-              <p className={`text-sm font-black capitalize ${directionColor(prediction.impact_direction)}`}>{directionArrow(prediction.impact_direction)} {prediction.impact_direction}</p>
-            </div>
-            <div>
-              <h4 className="mb-1 line-clamp-1 font-black text-quant-text">{prediction.title}</h4>
-              <p className="text-sm text-quant-muted">{formatLabel(prediction.event_type)} | {prediction.horizon}</p>
-            </div>
-            <div className="text-right">
-              <strong className="text-xl font-black text-quant-text">{Math.round(prediction.probability * 100)}%</strong>
-              <p className={directionColor(prediction.impact_direction)}>{prediction.expected_move_pct}% expected</p>
-            </div>
-          </button>
-          );
+          return <SignalBriefCard key={`${prediction.symbol}-${index}`} prediction={prediction} index={index} />;
         })}
       </div>
+      </section>
     </section>
   );
 }
@@ -1073,15 +1152,24 @@ function PredictionDetailPage({ summary, index, marketRegime, allPredictions }: 
     <div className="grid gap-5 xl:grid-cols-[1fr_420px]">
       <section className="quant-panel p-5">
         <button onClick={() => go("#/predictions")} className="mb-4 inline-flex items-center gap-2 text-sm font-bold text-quant-muted hover:text-quant-text"><ArrowLeft size={14} /> Predictions</button>
-        <p className="quant-eyebrow">Prediction Detail</p>
+        <p className="quant-eyebrow">Signal Detail</p>
         <h2 className="mb-2 text-4xl font-black text-quant-text">{prediction.symbol}</h2>
-        <p className={`mb-5 text-xl font-black capitalize ${directionColor(prediction.impact_direction)}`}>{directionArrow(prediction.impact_direction)} {prediction.impact_direction} | {Math.round(prediction.probability * 100)}%</p>
+        <p className={`mb-5 text-xl font-black capitalize ${directionColor(prediction.impact_direction)}`}>{directionArrow(prediction.impact_direction)} {formatInvestorDirection(prediction.impact_direction)} | {Math.round(prediction.probability * 100)}%</p>
         <div className="grid gap-3 md:grid-cols-4">
           <DetailStat label="Expected" value={`${prediction.expected_move_pct}%`} />
+          <DetailStat label="Excess" value={`${prediction.expected_excess_return_pct > 0 ? "+" : ""}${prediction.expected_excess_return_pct ?? 0}%`} />
           <DetailStat label="Range" value={`${prediction.expected_move_low_pct}% to ${prediction.expected_move_high_pct}%`} />
           <DetailStat label="Horizon" value={prediction.horizon} />
-          <DetailStat label="Model" value={prediction.model_version} />
         </div>
+        <section className="mt-5 rounded-lg border border-quant-line bg-white/45 p-4 backdrop-blur-xl">
+          <p className="quant-eyebrow mb-2">Why this matters</p>
+          <p className="text-base leading-7 text-quant-text">{prediction.why_this_matters || prediction.base_case}</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <span className="quant-tag">{formatLabel(prediction.actionability ?? "watch")}</span>
+            <span className="quant-tag">{formatLabel(prediction.confidence_tier ?? "medium")} confidence</span>
+            {prediction.risk_factors?.slice(0, 3).map((risk) => <span key={risk} className="quant-tag">Risk: {risk}</span>)}
+          </div>
+        </section>
         <section className="mt-5 rounded-lg border border-quant-line bg-quant-panel2 p-4">
           <p className="quant-eyebrow mb-2">Source event</p>
           <h3 className="font-black text-quant-text">{prediction.title}</h3>
@@ -1100,9 +1188,9 @@ function PredictionDetailPage({ summary, index, marketRegime, allPredictions }: 
         </section>
       </section>
       <section className="quant-panel p-4">
-        <p className="quant-eyebrow mb-3">SHAP contributors</p>
+        <p className="quant-eyebrow mb-3">Model diagnostics</p>
         <div className="grid gap-2">
-          {(prediction.shap_contributions ?? []).length === 0 ? <p className="text-sm text-quant-muted">No SHAP contributors available yet.</p> : prediction.shap_contributions.map((item) => <FeatureBar key={item.feature} label={item.feature} value={item.shap_value} />)}
+          {(prediction.shap_contributions ?? []).length === 0 ? <p className="text-sm text-quant-muted">No feature attribution available yet.</p> : prediction.shap_contributions.map((item) => <FeatureBar key={item.feature} label={item.feature} value={item.shap_value} />)}
         </div>
         <div className="mt-5 rounded-lg border border-quant-line bg-quant-panel2 p-3">
           <p className="quant-eyebrow mb-2">Drivers</p>
@@ -1490,6 +1578,60 @@ function EventRow({ event, expanded = false, compact = false }: { event: EventRe
   );
 }
 
+function SignalBriefCard({ prediction, index, featured = false }: { prediction: PredictionSummary["predictions"][number]; index: number; featured?: boolean }) {
+  const actionability = prediction.actionability ?? (prediction.is_actionable ? "actionable" : "blocked");
+  const actionTone = actionability === "actionable" ? "text-quant-green" : actionability === "watch" ? "text-quant-yellow" : "text-quant-muted";
+  const moveTone = directionColor(prediction.impact_direction);
+  return (
+    <button
+      type="button"
+      onClick={() => go(`#/predictions/${index}`)}
+      className={`rounded-lg border border-quant-line bg-white/48 p-4 text-left shadow-sm backdrop-blur-xl transition hover:border-quant-blue/30 hover:bg-white/65 ${featured ? "h-full" : ""}`}
+    >
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div>
+          <p className="quant-eyebrow mb-1">{formatLabel(actionability)}</p>
+          <strong className={`${featured ? "text-4xl" : "text-2xl"} font-black text-quant-text`}>{prediction.symbol}</strong>
+        </div>
+        <span className={`rounded-md border border-quant-line bg-white/50 px-2 py-1 text-xs font-black uppercase ${actionTone}`}>
+          {prediction.confidence_tier ?? "medium"}
+        </span>
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        <SignalMiniStat label="Signal" value={formatInvestorDirection(prediction.impact_direction)} tone={moveTone} />
+        <SignalMiniStat label="Move" value={`${prediction.expected_move_pct > 0 ? "+" : ""}${prediction.expected_move_pct}%`} tone={moveTone} />
+        <SignalMiniStat label="Excess" value={`${prediction.expected_excess_return_pct > 0 ? "+" : ""}${prediction.expected_excess_return_pct ?? 0}%`} tone={moveTone} />
+      </div>
+      <p className="mt-4 line-clamp-2 text-sm leading-6 text-quant-muted">
+        {prediction.why_this_matters || prediction.title}
+      </p>
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <span className="quant-tag">{prediction.horizon}</span>
+        <span className="quant-tag">{formatLabel(prediction.event_type)}</span>
+        <span className={`text-xs font-black uppercase ${actionTone}`}>{formatLabel(actionability)}</span>
+      </div>
+      {(prediction.risk_factors?.length ?? 0) > 0 && (
+        <p className="mt-3 text-xs text-quant-muted">Risk: {prediction.risk_factors.slice(0, 2).join(", ")}</p>
+      )}
+    </button>
+  );
+}
+
+function SignalMiniStat({ label, value, tone }: { label: string; value: string; tone: string }) {
+  return (
+    <div className="rounded-md border border-quant-line bg-white/42 p-2">
+      <p className="text-[0.6rem] font-bold uppercase text-quant-muted">{label}</p>
+      <strong className={`text-sm font-black capitalize ${tone}`}>{value}</strong>
+    </div>
+  );
+}
+
+function formatInvestorDirection(direction: string) {
+  if (direction === "positive") return "Bullish";
+  if (direction === "negative") return "Bearish";
+  return "Neutral";
+}
+
 function ActionStrip({
   apiStatus,
   lastUpdated,
@@ -1658,10 +1800,25 @@ function HoldingsWorkspace({
       net: positiveEvents > negativeEvents ? "positive" : negativeEvents > positiveEvents ? "negative" : "neutral",
       risk,
       strongestPrediction,
+      description: holdingDescription(symbol),
+      fiveDayChange: quoteChangePct(quotes[symbol]),
     };
   });
   const portfolioRisk = rows.length ? Math.round(rows.reduce((sum, row) => sum + row.risk, 0) / rows.length) : 0;
   const covered = rows.filter((row) => row.events.length > 0 || row.predictions.length > 0).length;
+  const signaledRows = rows.filter((row) => row.strongestPrediction);
+  const avgExpectedMove = signaledRows.length
+    ? signaledRows.reduce((sum, row) => sum + row.strongestPrediction!.prediction.expected_move_pct, 0) / signaledRows.length
+    : 0;
+  const avgExpectedExcess = signaledRows.length
+    ? signaledRows.reduce((sum, row) => sum + (row.strongestPrediction!.prediction.expected_excess_return_pct ?? 0), 0) / signaledRows.length
+    : 0;
+  const bullish = signaledRows.filter((row) => row.strongestPrediction?.prediction.impact_direction === "positive").length;
+  const bearish = signaledRows.filter((row) => row.strongestPrediction?.prediction.impact_direction === "negative").length;
+  const uncovered = rows.filter((row) => row.events.length === 0 && row.predictions.length === 0).map((row) => row.symbol);
+  const mostAtRisk = [...rows].sort((a, b) => b.risk - a.risk)[0];
+  const strongestSignal = [...signaledRows].sort((a, b) => b.strongestPrediction!.prediction.ranking_score - a.strongestPrediction!.prediction.ranking_score)[0];
+  const portfolioTone = avgExpectedMove > 0.15 ? "positive" : avgExpectedMove < -0.15 ? "negative" : "neutral";
 
   return (
     <section className="quant-panel p-4">
@@ -1685,8 +1842,38 @@ function HoldingsWorkspace({
           placeholder="AAPL, MSFT, QQQ, GLD"
         />
         <button className="quant-button" onClick={() => onHoldingsChange(holdingsText)}>
-          Analyze holdings
+          Update watchlist
         </button>
+      </div>
+      <div className="mb-4 grid gap-3 xl:grid-cols-[1.15fr_0.85fr]">
+        <section className="rounded-lg border border-quant-line bg-white/45 p-4 backdrop-blur-xl">
+          <p className="quant-eyebrow mb-2">Portfolio forecast</p>
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h4 className={`text-3xl font-black ${directionColor(portfolioTone)}`}>{formatInvestorDirection(portfolioTone)}</h4>
+              <p className="mt-1 text-sm leading-6 text-quant-muted">
+                Equal-weighted across holdings with available model signals. Basis sees {bullish} bullish and {bearish} bearish signal{bullish + bearish === 1 ? "" : "s"}.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-right">
+              <DetailStat label="Expected move" value={signaledRows.length ? `${avgExpectedMove >= 0 ? "+" : ""}${avgExpectedMove.toFixed(2)}%` : "--"} />
+              <DetailStat label="Expected excess" value={signaledRows.length ? `${avgExpectedExcess >= 0 ? "+" : ""}${avgExpectedExcess.toFixed(2)}%` : "--"} />
+            </div>
+          </div>
+          <div className="mt-4 grid gap-2 md:grid-cols-3">
+            <InvestorInsight label="Highest risk" value={mostAtRisk?.symbol ?? "--"} detail={mostAtRisk ? `${Math.round(mostAtRisk.risk)} risk score` : "Add holdings to calculate"} tone={mostAtRisk?.net} />
+            <InvestorInsight label="Strongest signal" value={strongestSignal?.symbol ?? "--"} detail={strongestSignal ? `${Math.round(strongestSignal.strongestPrediction!.prediction.probability * 100)}% confidence` : "No active holding signal"} tone={strongestSignal?.strongestPrediction?.prediction.impact_direction} />
+            <InvestorInsight label="Uncovered" value={uncovered.length.toString()} detail={uncovered.length ? uncovered.slice(0, 3).join(", ") : "All holdings have context"} />
+          </div>
+        </section>
+        <section className="rounded-lg border border-quant-line bg-white/45 p-4 backdrop-blur-xl">
+          <p className="quant-eyebrow mb-2">What you would normally calculate</p>
+          <div className="grid gap-2">
+            <PortfolioCalculation label="Macro concentration" value={`${holdingSymbols.length ? Math.round((covered / holdingSymbols.length) * 100) : 0}%`} detail="Share of holdings currently linked to events or model signals." />
+            <PortfolioCalculation label="Signal balance" value={`${bullish}-${bearish}`} detail="Bullish vs bearish holdings in the current model queue." />
+            <PortfolioCalculation label="Market sensitivity" value={regime ? regimeName(regime.market_regime_encoded) : "--"} detail="Current backdrop used to interpret the holding signals." />
+          </div>
+        </section>
       </div>
       <div className="grid gap-3 xl:grid-cols-2">
         {rows.length === 0 ? (
@@ -1701,8 +1888,9 @@ function HoldingsWorkspace({
             <div className="mb-2 flex items-start justify-between gap-3">
               <div>
                 <strong className="text-lg font-black text-quant-text">{row.symbol}</strong>
+                <p className="mt-1 line-clamp-2 text-xs leading-5 text-quant-muted">{row.description}</p>
                 <p className="text-xs text-quant-muted">
-                  {row.events.length} event{row.events.length === 1 ? "" : "s"} | {row.predictions.length} forecast{row.predictions.length === 1 ? "" : "s"}
+                  {row.events.length} catalyst{row.events.length === 1 ? "" : "s"} | {row.predictions.length} signal{row.predictions.length === 1 ? "" : "s"}
                 </p>
               </div>
               <div className="text-right">
@@ -1712,17 +1900,53 @@ function HoldingsWorkspace({
             </div>
             <div className="grid gap-2 sm:grid-cols-3">
               <MiniHoldingStat label="Price" value={typeof row.quote?.price === "number" ? `$${row.quote.price.toFixed(2)}` : "--"} />
-              <MiniHoldingStat label="Net macro" value={formatLabel(row.net)} tone={row.net} />
+              <MiniHoldingStat label="5D" value={row.fiveDayChange === null ? "--" : `${row.fiveDayChange >= 0 ? "+" : ""}${row.fiveDayChange.toFixed(2)}%`} tone={row.fiveDayChange === null ? undefined : row.fiveDayChange >= 0 ? "positive" : "negative"} />
+              <MiniHoldingStat label="Macro view" value={formatInvestorDirection(row.net)} tone={row.net} />
+            </div>
+            <div className="mt-2 grid gap-2 sm:grid-cols-3">
               <MiniHoldingStat
-                label="Top forecast"
-                value={row.strongestPrediction ? `${Math.round(row.strongestPrediction.prediction.probability * 100)}% ${row.strongestPrediction.prediction.impact_direction}` : "--"}
+                label="Top signal"
+                value={row.strongestPrediction ? `${Math.round(row.strongestPrediction.prediction.probability * 100)}% ${formatInvestorDirection(row.strongestPrediction.prediction.impact_direction)}` : "--"}
                 tone={row.strongestPrediction?.prediction.impact_direction}
+              />
+              <MiniHoldingStat
+                label="Expected"
+                value={row.strongestPrediction ? `${row.strongestPrediction.prediction.expected_move_pct >= 0 ? "+" : ""}${row.strongestPrediction.prediction.expected_move_pct}%` : "--"}
+                tone={row.strongestPrediction?.prediction.impact_direction}
+              />
+              <MiniHoldingStat
+                label="Action"
+                value={row.strongestPrediction ? formatLabel(row.strongestPrediction.prediction.actionability ?? "watch") : "Monitor"}
+                tone={row.strongestPrediction?.prediction.actionability === "actionable" ? "positive" : row.strongestPrediction?.prediction.actionability === "blocked" ? "negative" : undefined}
               />
             </div>
           </button>
         ))}
       </div>
     </section>
+  );
+}
+
+function InvestorInsight({ label, value, detail, tone }: { label: string; value: string; detail: string; tone?: string }) {
+  const toneClass = tone === "positive" ? "text-quant-green" : tone === "negative" ? "text-quant-red" : "text-quant-text";
+  return (
+    <div className="rounded-md border border-quant-line bg-white/42 p-3">
+      <p className="text-[0.6rem] font-bold uppercase text-quant-muted">{label}</p>
+      <strong className={`block text-lg font-black ${toneClass}`}>{value}</strong>
+      <p className="mt-1 text-xs leading-5 text-quant-muted">{detail}</p>
+    </div>
+  );
+}
+
+function PortfolioCalculation({ label, value, detail }: { label: string; value: string; detail: string }) {
+  return (
+    <div className="rounded-md border border-quant-line bg-white/42 p-3">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-sm font-black text-quant-text">{label}</span>
+        <strong className="text-quant-blue">{value}</strong>
+      </div>
+      <p className="mt-1 text-xs leading-5 text-quant-muted">{detail}</p>
+    </div>
   );
 }
 
@@ -1734,6 +1958,38 @@ function MiniHoldingStat({ label, value, tone }: { label: string; value: string;
       <strong className={`text-xs font-black capitalize ${toneClass}`}>{value}</strong>
     </div>
   );
+}
+
+function quoteChangePct(quote: PriceQuote | undefined): number | null {
+  const history = quote?.history ?? [];
+  if (history.length < 2) return null;
+  const first = history[0];
+  const last = history[history.length - 1];
+  if (!first) return null;
+  return ((last - first) / first) * 100;
+}
+
+function holdingDescription(symbol: string): string {
+  const descriptions: Record<string, string> = {
+    AAPL: "Apple gives the portfolio large-cap consumer technology exposure with sensitivity to hardware demand, services growth, dollar moves, and broad risk appetite.",
+    MSFT: "Microsoft is a mega-cap software and cloud holding, often driven by enterprise spending, AI infrastructure expectations, rates, and broad technology sentiment.",
+    NVDA: "Nvidia is a high-beta AI and semiconductor holding, usually sensitive to chip demand, capex cycles, export controls, and growth-stock conditions.",
+    AMZN: "Amazon blends consumer spending, cloud infrastructure, logistics costs, and risk appetite, making it sensitive to both growth data and margin expectations.",
+    GOOGL: "Alphabet is a large-cap digital advertising and AI infrastructure holding tied to ad demand, regulation, cloud growth, and broad tech multiples.",
+    META: "Meta is a communication-services growth holding with exposure to digital ads, AI capex, consumer demand, and regulatory headlines.",
+    TSLA: "Tesla is a high-volatility growth and EV holding tied to rates, consumer credit, delivery expectations, margins, and risk appetite.",
+    SPY: "SPY tracks broad U.S. large-cap equities and is the core benchmark for overall market exposure.",
+    QQQ: "QQQ concentrates large-cap growth and technology exposure, usually more sensitive to rates and risk appetite than broad-market ETFs.",
+    IWM: "IWM tracks U.S. small caps, making it more sensitive to domestic growth, credit conditions, and regional-bank stress.",
+    TLT: "TLT tracks long-duration Treasuries and is highly sensitive to inflation, rates, Fed expectations, and recession risk.",
+    GLD: "GLD tracks gold exposure, often used as an inflation, dollar, geopolitical, or risk-hedge proxy.",
+    XLE: "XLE tracks energy equities and tends to react to oil prices, supply shocks, geopolitical risk, and global demand.",
+    XLK: "XLK gives sector-level technology exposure, with sensitivity to rates, earnings revisions, AI spending, and broad growth sentiment.",
+    XLF: "XLF tracks financials and tends to move with rates, credit risk, loan growth, and bank profitability expectations.",
+    USO: "USO tracks oil exposure and is sensitive to crude supply, demand, inventories, OPEC policy, and geopolitical disruption.",
+    JETS: "JETS tracks airlines and is sensitive to fuel costs, travel demand, labor costs, and consumer conditions.",
+  };
+  return descriptions[symbol.toUpperCase()] ?? `${symbol.toUpperCase()} is monitored for macro-linked events, price changes, active model signals, and portfolio risk contribution.`;
 }
 
 function ProcessStep({ label, detail }: { label: string; detail: string }) {
@@ -2232,12 +2488,12 @@ function EmptyState({ title, action, onClick }: { title: string; action: string;
 function pageTitle(route: Route): string {
   if (route.name === "event") return "Event Detail";
   if (route.name === "asset") return route.symbol;
-  if (route.name === "prediction") return "Prediction Detail";
-  if (route.name === "events") return "Events";
+  if (route.name === "prediction") return "Signal Detail";
+  if (route.name === "events") return "Market Feed";
   if (route.name === "assets") return "Assets";
-  if (route.name === "predictions") return "Predictions";
-  if (route.name === "portfolio") return "My Portfolio";
-  if (route.name === "ml") return "Model";
+  if (route.name === "predictions") return "Signals";
+  if (route.name === "portfolio") return "Holdings";
+  if (route.name === "ml") return "Diagnostics";
   if (route.name === "regime") return "Market Regime";
   if (route.name === "training") return "Training Run";
   if (route.name === "signal") return "Signal Detail";
@@ -2245,11 +2501,11 @@ function pageTitle(route: Route): string {
   if (route.name === "alerts") return "Alerts";
   if (route.name === "accuracy") return "Accuracy";
   if (route.name === "data") return "System Health";
-  return "Overview";
+  return "Command";
 }
 
 function pageEyebrow(route: Route): string {
-  if (route.name === "overview") return "Command Center";
+  if (route.name === "overview") return "Investor Command";
   if (route.name === "event" || route.name === "asset" || route.name === "prediction") return "Drilldown";
   if (route.name === "data") return "Operations";
   return "Workspace";

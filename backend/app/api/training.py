@@ -133,6 +133,7 @@ def train_model(
         "model_comparison": payload["model_comparison"],
         "calibration": payload["calibration"],
         "decision_threshold": payload["decision_threshold"],
+        "segment_models": payload["segment_models"],
         "top_features": payload["top_features"],
         "shap_summary": payload["shap_summary"],
         "confidence_analysis": payload["confidence_analysis"],

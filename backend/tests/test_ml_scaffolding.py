@@ -63,7 +63,7 @@ def test_prediction_pipeline_stores_features_and_exports_labeled_dataset(monkeyp
         prediction = db_session.query(Prediction).one()
         snapshot = db_session.query(FeatureSnapshot).one()
         assert prediction.asset == "SPY"
-        assert prediction.predicted_direction == "up"
+        assert prediction.predicted_direction == "down"
         assert snapshot.market_features["price"] == 100.0
 
         monkeypatch.setattr(
@@ -79,7 +79,7 @@ def test_prediction_pipeline_stores_features_and_exports_labeled_dataset(monkeyp
 
     assert result == {"computed": 1, "skipped": 0, "filtered": 0}
     assert outcome.label == 1
-    assert outcome.filtered_label == 1
+    assert outcome.filtered_label == 0
     assert outcome.actual_return == 0.1
     assert outcome.return_magnitude == 0.1
     assert dataset["labels"] == [1]
@@ -93,10 +93,12 @@ def test_prediction_pipeline_stores_features_and_exports_labeled_dataset(monkeyp
     assert feature_map["market_relative_strength_5d"] == 0.0
     assert "derived_sentiment_x_sector_sensitivity" in feature_map
     assert "derived_event_type_asset_class_interaction" in feature_map
-    assert "derived_historical_accuracy_of_event_type" in feature_map
-    assert "derived_rolling_accuracy_of_asset_predictions" in feature_map
-    assert "derived_event_asset_avg_return" in feature_map
-    assert "derived_event_asset_accuracy" in feature_map
+    assert "derived_historical_accuracy_of_event_type" not in feature_map
+    assert "derived_rolling_accuracy_of_asset_predictions" not in feature_map
+    assert "derived_event_asset_avg_return" not in feature_map
+    assert "derived_event_asset_accuracy" not in feature_map
+    assert "derived_event_novelty" in feature_map
+    assert "market_asset_momentum_20d" in feature_map
     assert "outcome_return_magnitude" not in feature_map
     assert all(isinstance(value, (int, float)) for value in dataset["features"][0])
 

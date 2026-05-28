@@ -14,6 +14,7 @@ _RAW_MODEL_PATH = _MODELS_DIR / "xgboost_model.json"
 _CALIBRATED_MODEL_PATH = _MODELS_DIR / "calibrated_model.pkl"
 _FEATURE_NAMES_PATH = _MODELS_DIR / "feature_names.json"
 _DECISION_THRESHOLD_PATH = _MODELS_DIR / "decision_threshold.json"
+_HORIZON_MODELS_DIR = _MODELS_DIR / "horizons"
 
 _cached_raw: XGBClassifier | None = None
 _cached_raw_mtime: float | None = None
@@ -97,6 +98,25 @@ def get_decision_threshold(path: Path = _DECISION_THRESHOLD_PATH) -> float:
         logger.warning("Failed to load decision threshold: %s", exc)
         return 0.5
     return _cached_decision_threshold
+
+
+def get_horizon_artifacts(horizon_days: int) -> tuple[object | None, list[str] | None, float]:
+    """Load a calibrated horizon-specific model bundle when training produced one."""
+    horizon_dir = _HORIZON_MODELS_DIR / f"{int(horizon_days)}d"
+    model_path = horizon_dir / "calibrated_model.pkl"
+    feature_names_path = horizon_dir / "feature_names.json"
+    threshold_path = horizon_dir / "decision_threshold.json"
+    if not model_path.exists() or not feature_names_path.exists():
+        return None, None, 0.5
+
+    try:
+        model = joblib.load(model_path)
+        feature_names = json.loads(feature_names_path.read_text())
+        threshold = get_decision_threshold(threshold_path)
+        return model, feature_names, threshold
+    except Exception as exc:
+        logger.warning("Failed to load %sd horizon model: %s", horizon_days, exc)
+        return None, None, 0.5
 
 
 def invalidate_cache() -> None:

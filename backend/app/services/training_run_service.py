@@ -140,11 +140,16 @@ def get_model_health(db: Session) -> dict[str, Any]:
 
 def _rolling_accuracy(db: Session, *, window: int) -> dict[str, Any] | None:
     multi_rows = [
-        (timestamp, int(label))
-        for timestamp, label in (
-            db.query(Prediction.timestamp, MultiHorizonOutcome.label)
+        (timestamp, _direction_matches_label(direction, _target_label(benchmark_label, label)))
+        for timestamp, direction, benchmark_label, label in (
+            db.query(
+                Prediction.timestamp,
+                Prediction.predicted_direction,
+                MultiHorizonOutcome.benchmark_label,
+                MultiHorizonOutcome.label,
+            )
             .join(MultiHorizonOutcome, MultiHorizonOutcome.prediction_id == Prediction.id)
-            .filter(MultiHorizonOutcome.label.isnot(None))
+            .filter(MultiHorizonOutcome.benchmark_label.isnot(None) | MultiHorizonOutcome.label.isnot(None))
             .all()
         )
     ]
@@ -152,18 +157,18 @@ def _rolling_accuracy(db: Session, *, window: int) -> dict[str, Any] | None:
         prediction_id
         for (prediction_id,) in (
             db.query(MultiHorizonOutcome.prediction_id)
-            .filter(MultiHorizonOutcome.label.isnot(None))
+            .filter(MultiHorizonOutcome.benchmark_label.isnot(None) | MultiHorizonOutcome.label.isnot(None))
             .distinct()
             .all()
         )
     ]
     single_rows = [
-        (timestamp, int(label))
-        for timestamp, label in (
-            db.query(Prediction.timestamp, Outcome.filtered_label)
+        (timestamp, _direction_matches_label(direction, _target_label(benchmark_label, label)))
+        for timestamp, direction, benchmark_label, label in (
+            db.query(Prediction.timestamp, Prediction.predicted_direction, Outcome.benchmark_label, Outcome.label)
             .join(Outcome, Outcome.prediction_id == Prediction.id)
             .filter(
-                Outcome.filtered_label.isnot(None),
+                Outcome.benchmark_label.isnot(None) | Outcome.label.isnot(None),
                 ~Prediction.id.in_(multi_prediction_ids),
             )
             .all()
@@ -297,3 +302,14 @@ def _deployment_accuracy(payload: dict[str, Any]) -> float:
     if value is None:
         value = payload["accuracy"]
     return float(value)
+
+
+def _target_label(benchmark_label: int | None, raw_label: int | None) -> int:
+    label = benchmark_label if benchmark_label is not None else raw_label
+    if label is None:
+        raise ValueError("health row is missing both benchmark and raw labels")
+    return int(label)
+
+
+def _direction_matches_label(direction: str, label: int) -> int:
+    return int((direction == "up" and label == 1) or (direction == "down" and label == 0))

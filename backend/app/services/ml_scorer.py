@@ -22,34 +22,40 @@ def score_with_ml_model(
         get_calibrated_model,
         get_decision_threshold,
         get_feature_names,
+        get_horizon_artifacts,
         get_model,
     )
 
+    horizon_days = int(float(derived_features.get("horizon_days", 1) or 1))
+    horizon_model, horizon_feature_names, horizon_threshold = get_horizon_artifacts(horizon_days)
     feature_names = get_feature_names()
     calibrated = get_calibrated_model()
     raw = get_model()
     threshold = get_decision_threshold()
 
-    predictor = calibrated or raw
-    if predictor is None or feature_names is None:
+    predictor = horizon_model or calibrated or raw
+    effective_feature_names = horizon_feature_names or feature_names
+    effective_threshold = horizon_threshold if horizon_model is not None else threshold
+    if predictor is None or effective_feature_names is None:
         return fallback, BASELINE_MODEL_VERSION
 
     try:
         features = flatten_feature_snapshot(event_features, market_features, derived_features)
-        X = [[float(features.get(f, 0.0)) for f in feature_names]]
+        X = [[float(features.get(f, 0.0)) for f in effective_feature_names]]
 
         proba = predictor.predict_proba(X)[0]
         p_up = float(proba[1])
 
-        direction: PredictionDirection = "up" if p_up >= threshold else "down"
+        direction: PredictionDirection = "up" if p_up >= effective_threshold else "down"
         confidence = round(max(p_up, 1.0 - p_up), 4)
         score = round(p_up * 2.0 - 1.0, 6)
+        version = f"{ML_MODEL_VERSION}-{horizon_days}d" if horizon_model is not None else ML_MODEL_VERSION
 
         return BaselinePrediction(
             predicted_direction=direction,
             confidence=confidence,
             score=score,
-        ), ML_MODEL_VERSION
+        ), version
 
     except Exception as exc:
         logger.warning("ML inference failed, falling back to baseline: %s", exc)

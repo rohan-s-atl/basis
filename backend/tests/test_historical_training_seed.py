@@ -116,8 +116,8 @@ def test_historical_seed_creates_idempotent_multi_horizon_training_rows(monkeypa
     assert second.events_reused == 1
     assert second.predictions_inserted == 0
     assert second.outcomes_inserted == 0
-    assert [outcome.label for outcome in outcomes] == [1, 0, None]
-    assert dataset["labels"] == [1, 0]
+    assert [outcome.label for outcome in outcomes] == [0, 1, None]
+    assert dataset["labels"] == [0, 1]
     assert "derived_horizon_days" in dataset["feature_names"]
     assert snapshot.derived_features["vix_level"] == 18.5
     assert snapshot.derived_features["market_regime_encoded"] == 0

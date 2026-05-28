@@ -9,6 +9,7 @@ from app.services.feature_service import flatten_feature_snapshot
 
 logger = logging.getLogger(__name__)
 MIN_RECOMMENDED_DATASET_SIZE = 300
+TARGET_LABEL = "benchmark_relative_direction"
 
 
 def export_training_dataset(db: Session, *, limit: int = 10_000) -> dict[str, Any]:
@@ -133,7 +134,7 @@ def _single_horizon_rows(
         .join(Prediction, Prediction.id == FeatureSnapshot.prediction_id)
         .join(Outcome, Outcome.prediction_id == Prediction.id)
         .filter(
-            Outcome.filtered_label.isnot(None),
+            (Outcome.benchmark_label.isnot(None) | Outcome.label.isnot(None)),
             ~Prediction.id.in_(multi_prediction_ids),
         )
         .order_by(order_column)
@@ -153,7 +154,7 @@ def _single_horizon_rows(
         )
         dataset.append({
             "features": flattened,
-            "label": int(outcome.filtered_label),
+            "label": _target_label(outcome.benchmark_label, outcome.label),
             "timestamp": snapshot.prediction.timestamp,
             "computed_at": outcome.computed_at,
         })
@@ -173,7 +174,7 @@ def _multi_horizon_rows(
         db.query(FeatureSnapshot, MultiHorizonOutcome)
         .join(Prediction, Prediction.id == FeatureSnapshot.prediction_id)
         .join(MultiHorizonOutcome, MultiHorizonOutcome.prediction_id == Prediction.id)
-        .filter(MultiHorizonOutcome.label.isnot(None))
+        .filter(MultiHorizonOutcome.benchmark_label.isnot(None) | MultiHorizonOutcome.label.isnot(None))
         .order_by(order_column)
         .limit(limit)
         .all()
@@ -188,7 +189,7 @@ def _multi_horizon_rows(
         )
         dataset.append({
             "features": flattened,
-            "label": int(outcome.label),
+            "label": _target_label(outcome.benchmark_label, outcome.label),
             "timestamp": snapshot.prediction.timestamp,
             "computed_at": outcome.computed_at,
         })
@@ -197,22 +198,22 @@ def _multi_horizon_rows(
 
 def _confidence_label_rows(db: Session) -> list[tuple[float, int]]:
     multi_rows = [
-        (float(confidence), int(label))
-        for confidence, label in (
-            db.query(Prediction.confidence, MultiHorizonOutcome.label)
+        (float(confidence), _target_label(benchmark_label, label))
+        for confidence, benchmark_label, label in (
+            db.query(Prediction.confidence, MultiHorizonOutcome.benchmark_label, MultiHorizonOutcome.label)
             .join(MultiHorizonOutcome, MultiHorizonOutcome.prediction_id == Prediction.id)
-            .filter(MultiHorizonOutcome.label.isnot(None))
+            .filter(MultiHorizonOutcome.benchmark_label.isnot(None) | MultiHorizonOutcome.label.isnot(None))
             .all()
         )
     ]
     multi_prediction_ids = _multi_labeled_prediction_ids(db)
     single_rows = [
-        (float(confidence), int(label))
-        for confidence, label in (
-            db.query(Prediction.confidence, Outcome.filtered_label)
+        (float(confidence), _target_label(benchmark_label, label))
+        for confidence, benchmark_label, label in (
+            db.query(Prediction.confidence, Outcome.benchmark_label, Outcome.label)
             .join(Outcome, Outcome.prediction_id == Prediction.id)
             .filter(
-                Outcome.filtered_label.isnot(None),
+                Outcome.benchmark_label.isnot(None) | Outcome.label.isnot(None),
                 ~Prediction.id.in_(multi_prediction_ids),
             )
             .all()
@@ -226,7 +227,7 @@ def _multi_labeled_prediction_ids(db: Session) -> list[Any]:
         prediction_id
         for (prediction_id,) in (
             db.query(MultiHorizonOutcome.prediction_id)
-            .filter(MultiHorizonOutcome.label.isnot(None))
+            .filter(MultiHorizonOutcome.benchmark_label.isnot(None) | MultiHorizonOutcome.label.isnot(None))
             .distinct()
             .all()
         )
@@ -260,6 +261,7 @@ def _dataset_payload(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "num_samples": len(rows),
             "class_balance": _class_balance(labels),
             "feature_count": len(feature_names),
+            "target": TARGET_LABEL,
         },
     }
 
@@ -326,3 +328,10 @@ def _safe_numeric(value: Any) -> float:
     if isinstance(value, (int, float)) and not _is_invalid_number(value):
         return float(value)
     return 0.0
+
+
+def _target_label(benchmark_label: int | None, raw_label: int | None) -> int:
+    label = benchmark_label if benchmark_label is not None else raw_label
+    if label is None:
+        raise ValueError("training row is missing both benchmark and raw outcome labels")
+    return int(label)

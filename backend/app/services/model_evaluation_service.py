@@ -9,7 +9,6 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.db.models import Event, FeatureSnapshot, MultiHorizonOutcome, Outcome, Prediction
-from app.services.outcome_label_service import directional_label
 from app.services.training_data_service import validate_dataset
 
 
@@ -25,9 +24,12 @@ class EvaluationRow:
     predicted_direction: str
     event_sentiment: float
     spy_trend: float
+    sector_trend: float
     raw_return: float
+    excess_return: float | None
     return_bucket: str
-    label: int
+    target_label: int
+    model_correct: int
     benchmark_label: int | None
 
 
@@ -46,6 +48,9 @@ def get_model_evaluation(db: Session, *, limit: int = 50_000) -> dict[str, Any]:
         "by_horizon": _group_performance(rows, "horizon_days"),
         "by_return_bucket": _group_performance(rows, "return_bucket"),
         "by_model_version": _group_performance(rows, "model_version"),
+        "calibration": _calibration(rows),
+        "calibration_by_horizon": _calibration_by_group(rows, "horizon_days"),
+        "calibration_by_event_type": _calibration_by_group(rows, "event_type"),
         "data_quality": _data_quality(db, dataset_validation),
         "recommendations": _recommendations(rows, dataset_validation),
     }
@@ -60,7 +65,7 @@ def _evaluation_rows(db: Session, *, limit: int) -> list[EvaluationRow]:
             .join(Event, Event.id == Prediction.event_id)
             .join(FeatureSnapshot, FeatureSnapshot.prediction_id == Prediction.id)
             .join(MultiHorizonOutcome, MultiHorizonOutcome.prediction_id == Prediction.id)
-            .filter(MultiHorizonOutcome.label.isnot(None))
+            .filter(MultiHorizonOutcome.benchmark_label.isnot(None) | MultiHorizonOutcome.label.isnot(None))
             .order_by(Prediction.timestamp.asc())
             .limit(limit)
             .all()
@@ -74,7 +79,7 @@ def _evaluation_rows(db: Session, *, limit: int) -> list[EvaluationRow]:
             .join(FeatureSnapshot, FeatureSnapshot.prediction_id == Prediction.id)
             .join(Outcome, Outcome.prediction_id == Prediction.id)
             .filter(
-                Outcome.filtered_label.isnot(None),
+                Outcome.benchmark_label.isnot(None) | Outcome.label.isnot(None),
                 ~Prediction.id.in_(multi_prediction_ids),
             )
             .order_by(Prediction.timestamp.asc())
@@ -104,9 +109,12 @@ def _row_from_multi(
         predicted_direction=prediction.predicted_direction,
         event_sentiment=float(event.sentiment),
         spy_trend=float((snapshot.derived_features or {}).get("spy_trend", 0.0)),
+        sector_trend=float((snapshot.market_features or {}).get("sector_return_5d", 0.0)),
         raw_return=float(outcome.raw_return),
+        excess_return=outcome.excess_return,
         return_bucket=outcome.return_bucket,
-        label=int(outcome.label),
+        target_label=_target_label(outcome.benchmark_label, outcome.label),
+        model_correct=_direction_matches_label(prediction.predicted_direction, _target_label(outcome.benchmark_label, outcome.label)),
         benchmark_label=outcome.benchmark_label,
     )
 
@@ -128,30 +136,39 @@ def _row_from_single(
         predicted_direction=prediction.predicted_direction,
         event_sentiment=float(event.sentiment),
         spy_trend=float((snapshot.derived_features or {}).get("spy_trend", 0.0)),
+        sector_trend=float((snapshot.market_features or {}).get("sector_return_5d", 0.0)),
         raw_return=float(outcome.raw_return),
+        excess_return=outcome.excess_return,
         return_bucket=outcome.return_bucket,
-        label=int(outcome.filtered_label),
+        target_label=_target_label(outcome.benchmark_label, outcome.label),
+        model_correct=_direction_matches_label(prediction.predicted_direction, _target_label(outcome.benchmark_label, outcome.label)),
         benchmark_label=outcome.benchmark_label,
     )
 
 
 def _performance(rows: list[EvaluationRow]) -> dict[str, float | int]:
     if not rows:
-        return {"samples": 0, "accuracy": 0.0, "avg_return": 0.0}
+        return {"samples": 0, "accuracy": 0.0, "avg_return": 0.0, "avg_excess_return": 0.0}
+    excess_rows = [row.excess_return for row in rows if row.excess_return is not None]
     return {
         "samples": len(rows),
-        "accuracy": round(sum(row.label for row in rows) / len(rows), 4),
+        "accuracy": round(sum(row.model_correct for row in rows) / len(rows), 4),
         "avg_return": round(sum(row.raw_return for row in rows) / len(rows), 6),
+        "avg_excess_return": round(sum(float(value) for value in excess_rows) / len(excess_rows), 6) if excess_rows else 0.0,
     }
 
 
 def _benchmark_relative_performance(rows: list[EvaluationRow]) -> dict[str, float | int]:
-    labels = [int(row.benchmark_label) for row in rows if row.benchmark_label is not None]
-    if not labels:
-        return {"samples": 0, "accuracy": 0.0}
+    benchmark_rows = [row for row in rows if row.benchmark_label is not None]
+    if not benchmark_rows:
+        return {"samples": 0, "accuracy": 0.0, "avg_excess_return": 0.0}
     return {
-        "samples": len(labels),
-        "accuracy": round(sum(labels) / len(labels), 4),
+        "samples": len(benchmark_rows),
+        "accuracy": round(sum(row.model_correct for row in benchmark_rows) / len(benchmark_rows), 4),
+        "avg_excess_return": round(
+            sum(float(row.excess_return or 0.0) for row in benchmark_rows) / len(benchmark_rows),
+            6,
+        ),
     }
 
 
@@ -167,6 +184,10 @@ def _baseline_comparison(rows: list[EvaluationRow]) -> dict[str, dict[str, float
         "spy_trend": _baseline_performance(
             rows,
             lambda row: "up" if row.spy_trend >= 0 else "down",
+        ),
+        "sector_trend": _baseline_performance(
+            rows,
+            lambda row: "up" if row.sector_trend >= 0 else "down",
         ),
     }
 
@@ -199,20 +220,15 @@ def _raw_return_direction(rows: list[EvaluationRow]) -> dict[str, float | int]:
 
 
 def _baseline_performance(rows: list[EvaluationRow], direction_for_row) -> dict[str, float | int]:
-    labels = [
-        directional_label(
-            direction_for_row(row),
-            row.raw_return,
-            noise_threshold=0.0,
-        )
+    matches = [
+        _direction_matches_label(direction_for_row(row), row.target_label)
         for row in rows
     ]
-    resolved = [int(label) for label in labels if label is not None]
-    if not resolved:
+    if not matches:
         return {"samples": 0, "accuracy": 0.0}
     return {
-        "samples": len(resolved),
-        "accuracy": round(sum(resolved) / len(resolved), 4),
+        "samples": len(matches),
+        "accuracy": round(sum(matches) / len(matches), 4),
     }
 
 
@@ -230,6 +246,50 @@ def _group_performance(
     if limit is not None:
         ordered = ordered[:limit]
     return {key: _performance(items) for key, items in ordered}
+
+
+def _calibration(rows: list[EvaluationRow]) -> dict[str, dict[str, float | int]]:
+    buckets: dict[str, list[EvaluationRow]] = {
+        "0.5-0.6": [],
+        "0.6-0.7": [],
+        "0.7-0.8": [],
+        "0.8+": [],
+    }
+    for row in rows:
+        buckets[_confidence_bucket(row.confidence)].append(row)
+    return {name: _calibration_bucket(items) for name, items in buckets.items()}
+
+
+def _calibration_by_group(rows: list[EvaluationRow], attr: str) -> dict[str, dict[str, dict[str, float | int]]]:
+    groups: dict[str, list[EvaluationRow]] = defaultdict(list)
+    for row in rows:
+        groups[str(getattr(row, attr))].append(row)
+    return {
+        key: _calibration(items)
+        for key, items in sorted(groups.items(), key=lambda item: len(item[1]), reverse=True)[:10]
+    }
+
+
+def _calibration_bucket(rows: list[EvaluationRow]) -> dict[str, float | int]:
+    if not rows:
+        return {"samples": 0, "observed_accuracy": 0.0, "avg_confidence": 0.0, "avg_excess_return": 0.0}
+    excess_rows = [row.excess_return for row in rows if row.excess_return is not None]
+    return {
+        "samples": len(rows),
+        "observed_accuracy": round(sum(row.model_correct for row in rows) / len(rows), 4),
+        "avg_confidence": round(sum(row.confidence for row in rows) / len(rows), 4),
+        "avg_excess_return": round(sum(float(value) for value in excess_rows) / len(excess_rows), 6) if excess_rows else 0.0,
+    }
+
+
+def _confidence_bucket(confidence: float) -> str:
+    if confidence < 0.6:
+        return "0.5-0.6"
+    if confidence < 0.7:
+        return "0.6-0.7"
+    if confidence < 0.8:
+        return "0.7-0.8"
+    return "0.8+"
 
 
 def _data_quality(db: Session, validation: dict[str, Any]) -> dict[str, Any]:
@@ -291,11 +351,22 @@ def _multi_labeled_prediction_ids(db: Session) -> list[Any]:
         prediction_id
         for (prediction_id,) in (
             db.query(MultiHorizonOutcome.prediction_id)
-            .filter(MultiHorizonOutcome.label.isnot(None))
+            .filter(MultiHorizonOutcome.benchmark_label.isnot(None) | MultiHorizonOutcome.label.isnot(None))
             .distinct()
             .all()
         )
     ]
+
+
+def _target_label(benchmark_label: int | None, raw_label: int | None) -> int:
+    label = benchmark_label if benchmark_label is not None else raw_label
+    if label is None:
+        raise ValueError("evaluation row is missing both benchmark and raw labels")
+    return int(label)
+
+
+def _direction_matches_label(direction: str, label: int) -> int:
+    return int((direction == "up" and label == 1) or (direction == "down" and label == 0))
 
 
 def _horizon_days(value: str | None) -> int:

@@ -35,6 +35,43 @@ GATED_EVENT_TYPES = {"interest_rate_change"}
 GATED_HORIZON_DAYS = {3}
 CURRENT_MODEL_PREFIX = "xgboost-v1"
 
+_PREDICTION_NOISE_TERMS = {
+    "at no reserve",
+    "promo code",
+    "calendar",
+    "auction",
+    "convertible sport",
+    "grand marquis",
+    "sierra c3500",
+    "enduro project",
+    "legal framework for direct ocean carbon",
+}
+
+_PREDICTION_FINANCIAL_TERMS = {
+    "stock",
+    "stocks",
+    "shares",
+    "earnings",
+    "revenue",
+    "inflation",
+    "rate",
+    "rates",
+    "fed",
+    "market",
+    "markets",
+    "investor",
+    "investors",
+    "wall street",
+    "nasdaq",
+    "s&p",
+    "treasury",
+    "oil",
+    "chip",
+    "semiconductor",
+    "etf",
+    "guidance",
+}
+
 
 def generate_predictions(
     db: Session,
@@ -179,6 +216,8 @@ def _stored_ml_predictions(
         event = prediction.event
         raw_text = event.raw_text if event is not None else ""
         title = raw_text.splitlines()[0] if raw_text else f"{prediction.asset} prediction"
+        if not _is_prediction_relevant(title, raw_text):
+            continue
         direction = "positive" if prediction.predicted_direction == "up" else "negative"
         confidence = float(prediction.confidence)
         volatility = float((snapshot.market_features or {}).get("rolling_volatility", 0.0))
@@ -309,6 +348,13 @@ def _stored_drivers(model_version: str, confidence: float, shap: list[dict]) -> 
     ]
     drivers.extend(_driver_label(str(item["feature"])) for item in shap[:3])
     return drivers
+
+
+def _is_prediction_relevant(title: str, raw_text: str) -> bool:
+    text = f"{title} {raw_text}".lower()
+    if any(term in text for term in _PREDICTION_NOISE_TERMS):
+        return False
+    return any(term in text for term in _PREDICTION_FINANCIAL_TERMS)
 
 
 def _driver_label(feature: str) -> str:

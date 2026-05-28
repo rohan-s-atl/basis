@@ -304,21 +304,24 @@ def _store_predictions_for_assets(
 
 
 def _prediction_exists(db: Session, event: Event, symbol: str, horizon: str) -> bool:
-    existing_versions = [
-        str(version)
-        for (version,) in (
-            db.query(Prediction.model_version)
-            .filter(
-                Prediction.event_id == event.id,
-                Prediction.asset == symbol,
-                Prediction.horizon == horizon,
-            )
-            .all()
+    existing = (
+        db.query(Prediction, FeatureSnapshot)
+        .outerjoin(FeatureSnapshot, FeatureSnapshot.prediction_id == Prediction.id)
+        .filter(
+            Prediction.event_id == event.id,
+            Prediction.asset == symbol,
+            Prediction.horizon == horizon,
         )
-    ]
-    if not existing_versions:
+        .all()
+    )
+    if not existing:
         return False
-    if any(version.startswith("xgboost-v1") for version in existing_versions):
+    if any(
+        prediction.model_version.startswith("xgboost-v1")
+        and snapshot is not None
+        and "news_provider_count" in (snapshot.event_features or {})
+        for prediction, snapshot in existing
+    ):
         return True
     if _ml_artifacts_available():
         return False

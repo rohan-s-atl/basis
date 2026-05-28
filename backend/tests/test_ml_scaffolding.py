@@ -32,6 +32,11 @@ def test_prediction_pipeline_stores_features_and_exports_labeled_dataset(monkeyp
         "title": "Inflation data lifts rate expectations",
         "description": "Markets price in tighter policy after inflation runs hot.",
         "publishedAt": "2026-04-27T00:00:00Z",
+        "provider": "alpha_vantage",
+        "providers": "alpha_vantage,marketaux",
+        "provider_sentiment": "Bullish",
+        "related": "SPY,AAPL",
+        "source_count": 2,
     }
     classification = {
         "event_type": "inflation",
@@ -85,6 +90,11 @@ def test_prediction_pipeline_stores_features_and_exports_labeled_dataset(monkeyp
     assert dataset["labels"] == [1]
     feature_map = dict(zip(dataset["feature_names"], dataset["features"][0]))
     assert feature_map["event_event_type_encoded"] == 2
+    assert feature_map["event_news_provider_count"] == 2
+    assert feature_map["event_news_source_count"] == 2
+    assert feature_map["event_news_symbol_match"] == 1
+    assert feature_map["event_news_provider_sentiment_score"] == 1.0
+    assert feature_map["event_news_sentiment_alignment"] > 0
     assert feature_map["market_return_1d"] > 0
     assert feature_map["market_return_5d"] == 0.0
     assert feature_map["market_return_10d"] == 0.0

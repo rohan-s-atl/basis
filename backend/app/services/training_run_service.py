@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 AUTO_RETRAIN_MIN_GROWTH = 25
 _DRIFT_WINDOW = 30
+_MIN_HEALTH_SAMPLES = 30
 _DRIFT_THRESHOLD = 0.10  # 10 percentage-point drop from peak triggers drift alert
 _CONFIDENCE_DRIFT_WINDOW = 50
 _CONFIDENCE_DRIFT_THRESHOLD = 0.20
@@ -123,10 +124,13 @@ def get_model_health(db: Session) -> dict[str, Any]:
         and rolling["samples"] >= 10
         and (peak - rolling["accuracy"]) > _DRIFT_THRESHOLD
     )
-    drift = accuracy_drift or bool(confidence_drift.get("drift_detected"))
+    enough_health_samples = rolling is not None and rolling["samples"] >= _MIN_HEALTH_SAMPLES
+    drift = bool(enough_health_samples and (accuracy_drift or bool(confidence_drift.get("drift_detected"))))
+    status = "drift_detected" if drift else "healthy" if enough_health_samples else "warming_up"
 
     return {
-        "status": "drift_detected" if drift else "healthy",
+        "status": status,
+        "status_reason": None if status != "warming_up" else "active model has too few labeled outcomes for reliable live health",
         "rolling_accuracy": rolling,
         "peak_accuracy": peak,
         "trained_accuracy": peak,
@@ -257,10 +261,10 @@ def _confidence_distribution_drift(
         )
     ]
 
+    enough_samples = len(training_confidences) >= 20 and len(recent_confidences) >= 20
     training_dist = _confidence_distribution(training_confidences)
     recent_dist = _confidence_distribution(recent_confidences)
-    psi = _population_stability_index(training_dist, recent_dist)
-    enough_samples = len(training_confidences) >= 20 and len(recent_confidences) >= 20
+    psi = _population_stability_index(training_dist, recent_dist) if enough_samples else 0.0
 
     return {
         "drift_detected": bool(enough_samples and psi >= _CONFIDENCE_DRIFT_THRESHOLD),
@@ -269,6 +273,9 @@ def _confidence_distribution_drift(
         "training": training_dist,
         "recent": recent_dist,
         "samples": len(recent_confidences),
+        "training_samples": len(training_confidences),
+        "reliable": enough_samples,
+        "reason": None if enough_samples else "insufficient current-model history",
         "model_version": model_version or "all",
     }
 

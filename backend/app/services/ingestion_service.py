@@ -13,19 +13,35 @@ from app.services.prediction_pipeline import run_prediction_pipeline
 
 logger = logging.getLogger(__name__)
 
-_FINANCIAL_KEYWORDS = {
-    "market", "stock", "equity", "bond", "rate", "inflation", "economy", "gdp",
-    "federal", "reserve", "fed", "oil", "energy", "finance", "bank", "trade",
-    "currency", "dollar", "interest", "yield", "recession", "growth", "crypto",
-    "debt", "deficit", "tariff", "commodity", "index", "earnings", "revenue",
-    "geopolitical", "conflict", "supply", "demand", "sector", "invest", "fund",
-    "nasdaq", "dow", "s&p", "portfolio", "asset", "hedge", "exchange", "risk",
+_HIGH_INTENT_FINANCIAL_TERMS = {
+    "stock", "stocks", "equity", "equities", "bond", "bonds", "treasury",
+    "inflation", "gdp", "federal reserve", "fed", "oil price", "crude",
+    "finance", "bank", "currency", "dollar", "yield", "recession",
+    "earnings", "revenue", "tariff", "commodity", "nasdaq", "dow", "s&p",
+    "portfolio", "investor", "investors", "hedge fund", "exchange rate",
+    "crypto", "bitcoin", "rate cut", "rate hike",
+}
+
+_LOW_INTENT_FINANCIAL_TERMS = {
+    "market", "rate", "economy", "economic", "trade", "growth", "debt",
+    "deficit", "geopolitical", "conflict", "supply", "demand", "sector",
+    "risk", "index", "fund", "asset", "energy",
+}
+
+_NON_FINANCIAL_NOISE_TERMS = {
+    "at no reserve", "auction", "project car", "motorcycle", "enduro",
+    "yamaha", "recipe", "sports highlights", "celebrity",
 }
 
 
 def _is_financially_relevant(article: dict) -> bool:
     text = f"{article.get('title', '')} {article.get('description', '')}".lower()
-    return any(kw in text for kw in _FINANCIAL_KEYWORDS)
+    if any(term in text for term in _NON_FINANCIAL_NOISE_TERMS):
+        return False
+    if any(term in text for term in _HIGH_INTENT_FINANCIAL_TERMS):
+        return True
+    low_intent_hits = sum(1 for term in _LOW_INTENT_FINANCIAL_TERMS if term in text)
+    return low_intent_hits >= 2
 
 
 def ingest_events(db: Session) -> list[dict]:

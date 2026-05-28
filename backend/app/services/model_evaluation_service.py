@@ -386,11 +386,13 @@ def _recommendations(rows: list[EvaluationRow], validation: dict[str, Any]) -> l
         if name != "model"
     ) if rows else 0.0
 
-    if rows and model_accuracy <= best_baseline:
+    if len(rows) < 30:
+        recommendations.append("Current model has too few labeled live outcomes for reliable health decisions.")
+    if rows and len(rows) >= 30 and model_accuracy <= best_baseline:
         recommendations.append("Model is not beating simple baselines yet; keep signals gated.")
-    if high_confidence["samples"] and high_confidence["accuracy"] <= overall["accuracy"]:
+    if high_confidence["samples"] and len(rows) >= 30 and high_confidence["accuracy"] <= overall["accuracy"]:
         recommendations.append("High-confidence predictions are not outperforming the full set.")
-    if validation["issues"]:
+    if len(validation.get("issues") or []) > 0:
         recommendations.append("Resolve dataset validation issues before trusting retrains.")
     if len(rows) < 1000:
         recommendations.append("Keep accumulating labeled live outcomes; sample count is still thin.")

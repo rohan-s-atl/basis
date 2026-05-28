@@ -1,4 +1,5 @@
 import math
+from datetime import UTC, datetime
 from typing import Any
 
 from app.db.models import Event, EventRecord
@@ -52,6 +53,28 @@ LEAKY_DERIVED_FEATURES = {
     "rolling_accuracy_of_asset_predictions",
     "event_asset_avg_return",
     "event_asset_accuracy",
+}
+
+_NEWS_PROVIDER_WEIGHTS = {
+    "marketaux": 0.82,
+    "alpha_vantage": 0.78,
+    "finnhub": 0.72,
+    "newsapi": 0.58,
+    "mock": 0.2,
+}
+
+_SYMBOL_ALIASES = {
+    "AAPL": {"aapl", "apple"},
+    "AMZN": {"amzn", "amazon"},
+    "TSM": {"tsm", "tsmc", "taiwan semiconductor"},
+    "SPY": {"spy", "s&p 500", "s&p"},
+    "QQQ": {"qqq", "nasdaq"},
+    "XLK": {"xlk", "technology"},
+    "XLF": {"xlf", "financial"},
+    "XLE": {"xle", "energy"},
+    "GLD": {"gld", "gold"},
+    "TLT": {"tlt", "treasury", "bond"},
+    "USO": {"uso", "oil", "crude"},
 }
 
 
@@ -155,6 +178,34 @@ def build_event_features(event: Event) -> dict[str, float | int]:
             pass
 
     return features
+
+
+def build_news_signal_features(
+    article: dict[str, Any],
+    *,
+    symbol: str | None = None,
+    event_sentiment: float = 0.0,
+) -> dict[str, float | int]:
+    provider = str(article.get("provider") or article.get("source") or "unknown").strip().lower()
+    providers = _providers_from_article(article)
+    related_symbols = _related_symbols(article.get("related"))
+    symbol_upper = str(symbol or "").upper()
+    provider_sentiment = _provider_sentiment_score(article.get("provider_sentiment"))
+    symbol_match = _symbol_matches_article(symbol_upper, article, related_symbols) if symbol_upper else False
+
+    return {
+        "news_provider_encoded": _stable_string_encoding(provider),
+        "news_provider_weight": round(_provider_weight(providers or [provider]), 4),
+        "news_provider_count": len(providers) or (1 if provider and provider != "unknown" else 0),
+        "news_source_count": max(_safe_int(article.get("source_count"), 1), len(providers), 1),
+        "news_cross_provider_consensus": round(min((len(providers) or 1) / 3, 1.0), 4),
+        "news_related_symbol_count": len(related_symbols),
+        "news_symbol_specific": int(bool(related_symbols)),
+        "news_symbol_match": int(symbol_match),
+        "news_provider_sentiment_score": round(provider_sentiment, 4),
+        "news_sentiment_alignment": round(provider_sentiment * _clamp(event_sentiment, -1.0, 1.0), 4),
+        "news_recency_hours": round(_article_recency_hours(article.get("publishedAt")), 4),
+    }
 
 
 def build_market_features(
@@ -388,3 +439,74 @@ def _stable_string_encoding(value: str | None) -> int:
 
 def _clamp(value: float, lower: float, upper: float) -> float:
     return max(lower, min(upper, value))
+
+
+def _providers_from_article(article: dict[str, Any]) -> list[str]:
+    raw = article.get("providers") or article.get("provider") or article.get("source") or ""
+    if isinstance(raw, list):
+        providers = raw
+    else:
+        providers = str(raw).replace("|", ",").split(",")
+    return sorted({str(provider).strip().lower() for provider in providers if str(provider).strip()})
+
+
+def _related_symbols(value: Any) -> set[str]:
+    if isinstance(value, list):
+        items = value
+    else:
+        items = str(value or "").replace("|", ",").replace(";", ",").split(",")
+    return {str(item).strip().upper() for item in items if str(item).strip()}
+
+
+def _provider_weight(providers: list[str]) -> float:
+    weights = [_NEWS_PROVIDER_WEIGHTS.get(provider, 0.5) for provider in providers]
+    if not weights:
+        return 0.0
+    return sum(weights) / len(weights)
+
+
+def _provider_sentiment_score(value: Any) -> float:
+    if value is None:
+        return 0.0
+    try:
+        return _clamp(float(value), -1.0, 1.0)
+    except (TypeError, ValueError):
+        pass
+    text = str(value).strip().lower()
+    if "bull" in text or text in {"positive", "somewhat-positive"}:
+        return 1.0
+    if "bear" in text or text in {"negative", "somewhat-negative"}:
+        return -1.0
+    return 0.0
+
+
+def _article_recency_hours(value: Any) -> float:
+    if not value:
+        return 72.0
+    if isinstance(value, datetime):
+        published = value
+    else:
+        try:
+            published = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            return 72.0
+    if published.tzinfo is None:
+        published = published.replace(tzinfo=UTC)
+    return max((datetime.now(UTC) - published.astimezone(UTC)).total_seconds() / 3600, 0.0)
+
+
+def _symbol_matches_article(symbol: str, article: dict[str, Any], related_symbols: set[str]) -> bool:
+    if not symbol:
+        return False
+    if symbol in related_symbols:
+        return True
+    text = f"{article.get('title', '')} {article.get('description', '')}".lower()
+    aliases = _SYMBOL_ALIASES.get(symbol, {symbol.lower()})
+    return any(alias in text for alias in aliases)
+
+
+def _safe_int(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default

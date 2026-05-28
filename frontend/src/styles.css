@@ -12,7 +12,7 @@
     font-synthesis: none;
     text-rendering: optimizeLegibility;
     /* ~81% of 16px default → matches ~80% Chrome zoom density */
-    font-size: 13px;
+    font-size: 14px;
   }
 
   body {
@@ -42,11 +42,11 @@
 
 @layer components {
   .quant-panel {
-    @apply rounded-lg border border-quant-line bg-quant-panel shadow-panel backdrop-blur-2xl;
+    @apply rounded-lg border border-quant-line bg-quant-panel shadow-panel backdrop-blur-2xl transition duration-200;
   }
 
   .quant-panel-strong {
-    @apply rounded-lg border border-quant-line bg-white/75 shadow-panel backdrop-blur-2xl;
+    @apply rounded-lg border border-quant-line bg-white/75 shadow-panel backdrop-blur-2xl transition duration-200;
   }
 
   .quant-eyebrow {
@@ -63,6 +63,18 @@
 
   .quant-input {
     @apply h-10 w-full rounded-md border border-quant-line bg-white/55 px-3 text-sm text-quant-text outline-none backdrop-blur-xl transition placeholder:text-quant-muted focus:border-quant-blue/45;
+  }
+
+  .basis-logo {
+    animation: logo-rise 420ms ease both;
+  }
+
+  .loading-card {
+    animation: panel-rise 360ms ease both;
+  }
+
+  .loading-rail {
+    animation: rail-sweep 1.15s ease-in-out infinite;
   }
 
   .scrollbar-quant {
@@ -94,5 +106,41 @@
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@keyframes panel-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes logo-rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes rail-sweep {
+  0% {
+    transform: translateX(-120%);
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(220%);
+    opacity: 0.35;
   }
 }

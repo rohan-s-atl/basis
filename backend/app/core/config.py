@@ -36,6 +36,12 @@ class Settings:
         "NEWS_API_URL",
         "https://newsapi.org/v2/everything",
     )
+    finnhub_api_key: str | None = os.getenv("FINNHUB_API_KEY")
+    finnhub_api_url: str = os.getenv("FINNHUB_API_URL", "https://finnhub.io/api/v1")
+    alpha_vantage_api_key: str | None = os.getenv("ALPHA_VANTAGE_API_KEY")
+    alpha_vantage_api_url: str = os.getenv("ALPHA_VANTAGE_API_URL", "https://www.alphavantage.co/query")
+    marketaux_api_key: str | None = os.getenv("MARKETAUX_API_KEY")
+    marketaux_api_url: str = os.getenv("MARKETAUX_API_URL", "https://api.marketaux.com/v1/news/all")
     openai_api_key: str | None = os.getenv("OPENAI_API_KEY")
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
     fred_api_key: str | None = os.getenv("FRED_API_KEY")

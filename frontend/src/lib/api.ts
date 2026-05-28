@@ -4,6 +4,7 @@ const configuredApiUrl = import.meta.env.VITE_API_BASE_URL as string | undefined
 
 const normalizedConfiguredApiUrl = configuredApiUrl?.replace(/\/$/, "");
 const isProduction = import.meta.env.PROD;
+const RAILWAY_API_URL = "https://basis-backend-production.up.railway.app";
 
 const API_BASE_URLS = normalizedConfiguredApiUrl
   ? isProduction
@@ -15,7 +16,9 @@ const API_BASE_URLS = normalizedConfiguredApiUrl
           "http://127.0.0.1:8001"
         ])
       )
-  : ["http://127.0.0.1:8000", "http://127.0.0.1:8001"];
+  : isProduction
+    ? [RAILWAY_API_URL]
+    : ["http://127.0.0.1:8000", "http://127.0.0.1:8001", RAILWAY_API_URL];
 
 export async function fetchCombinedEvents(): Promise<{
   events: EventRecord[];
@@ -25,7 +28,7 @@ export async function fetchCombinedEvents(): Promise<{
 
   for (const baseUrl of API_BASE_URLS) {
     const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 8000);
+    const timeoutId = window.setTimeout(() => controller.abort(), 30_000);
 
     try {
       const response = await fetch(`${baseUrl}/combined`, {
@@ -104,9 +107,17 @@ export async function fetchPortfolioSimulation(): Promise<PortfolioSimulation> {
   return payload;
 }
 
-export async function fetchPredictions(limit = 50): Promise<PredictionSummary> {
-  const { payload } = await requestJson<PredictionSummary>(`/predictions?limit=${limit}`);
+export async function fetchPredictions(limit = 50, includeWeak = true): Promise<PredictionSummary> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    include_weak: includeWeak ? "true" : "false"
+  });
+  const { payload } = await requestJson<PredictionSummary>(`/predictions?${params.toString()}`, undefined, 30_000);
   return payload;
+}
+
+export async function refreshPredictions(limit = 250): Promise<void> {
+  await requestJson(`/refresh-predictions?limit=${limit}`, { method: "POST" }, 45_000);
 }
 
 export async function fetchModelHealth(): Promise<ModelHealth> {
@@ -169,11 +180,21 @@ async function requestJson<T>(
         baseUrl
       };
     } catch (error) {
-      lastError = error;
+      lastError = normalizeRequestError(error, path, timeoutMs);
     } finally {
       window.clearTimeout(timeoutId);
     }
   }
 
   throw lastError;
+}
+
+function normalizeRequestError(error: unknown, path: string, timeoutMs: number): Error {
+  if (error instanceof DOMException && error.name === "AbortError") {
+    return new Error(`${path} timed out after ${Math.round(timeoutMs / 1000)}s. Railway may still be waking up; try again in a moment.`);
+  }
+  if (error instanceof TypeError && String(error.message).toLowerCase().includes("failed to fetch")) {
+    return new Error(`${path} could not reach the backend. Check Vercel's API base URL or Railway health.`);
+  }
+  return error instanceof Error ? error : new Error("Request failed");
 }

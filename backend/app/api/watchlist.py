@@ -13,7 +13,8 @@ router = APIRouter(tags=["watchlist"])
 def get_watchlist_impact(request: WatchlistRequest) -> dict:
     try:
         events = []
-        for article in fetch_news():
+        symbols = [symbol.upper() for symbol in request.symbols]
+        for article in fetch_news(symbols=symbols):
             classification = classify_event(article)
             events.append(
                 {
@@ -23,6 +24,6 @@ def get_watchlist_impact(request: WatchlistRequest) -> dict:
                 }
             )
 
-        return analyze_watchlist(request.symbols, events)
+        return analyze_watchlist(symbols, events)
     except Exception as exc:
         raise HTTPException(status_code=500, detail="Failed to analyze watchlist") from exc

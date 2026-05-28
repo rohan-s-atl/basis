@@ -205,6 +205,7 @@ def _stored_ml_predictions(
                 prediction.asset,
                 event.event_type if event is not None else "general_market",
                 prediction.horizon,
+                model_version=model_version,
             ),
             drift_reason=_drift_reason(db),
             calibration_reason=calibration_reason,
@@ -306,8 +307,34 @@ def _stored_drivers(model_version: str, confidence: float, shap: list[dict]) -> 
         f"{round(confidence * 100)}% stored model confidence",
         f"model version: {model_version}",
     ]
-    drivers.extend(str(item["feature"]).replace("_", " ") for item in shap[:3])
+    drivers.extend(_driver_label(str(item["feature"])) for item in shap[:3])
     return drivers
+
+
+def _driver_label(feature: str) -> str:
+    labels = {
+        "event_news_provider_count": "multiple news sources confirmed the catalyst",
+        "event_news_source_count": "broad source coverage",
+        "event_news_cross_provider_consensus": "cross-provider news agreement",
+        "event_news_provider_weight": "higher-quality news source mix",
+        "event_news_symbol_match": "article directly matched the asset",
+        "event_news_symbol_specific": "company-specific news signal",
+        "event_news_provider_sentiment_score": "provider sentiment signal",
+        "event_news_sentiment_alignment": "news sentiment aligned with the event",
+        "event_news_recency_hours": "fresh news catalyst",
+        "event_sentiment": "event tone",
+        "event_severity": "event severity",
+        "derived_baseline_score": "baseline macro score",
+        "derived_sentiment_x_severity": "tone adjusted for severity",
+        "derived_sentiment_x_sector_sensitivity": "sector-sensitive event tone",
+        "derived_rate_level": "rate backdrop",
+        "derived_benchmark_price": "market benchmark level",
+        "market_rolling_volatility": "recent volatility",
+        "market_return_5d": "recent asset trend",
+        "market_return_10d": "medium-term asset trend",
+        "market_asset_class_encoded": "asset class behavior",
+    }
+    return labels.get(feature, feature.replace("_", " "))
 
 
 def _expected_move(event: EventRecord, asset_specificity: float) -> float:
@@ -481,8 +508,21 @@ def _drift_reason(db: Session) -> str | None:
     return None
 
 
-def _segment_quality_reason(db: Session, symbol: str, event_type: str, horizon: str) -> str | None:
-    rows = _segment_label_rows(db, symbol=symbol, event_type=event_type, horizon_days=_horizon_days(horizon))
+def _segment_quality_reason(
+    db: Session,
+    symbol: str,
+    event_type: str,
+    horizon: str,
+    *,
+    model_version: str | None = None,
+) -> str | None:
+    rows = _segment_label_rows(
+        db,
+        symbol=symbol,
+        event_type=event_type,
+        horizon_days=_horizon_days(horizon),
+        model_version=model_version,
+    )
     if len(rows) < 8:
         return None
 
@@ -504,6 +544,7 @@ def _segment_label_rows(
     symbol: str,
     event_type: str,
     horizon_days: int | None,
+    model_version: str | None = None,
 ) -> list[tuple[str, int]]:
     symbol = symbol.upper()
     multi = (
@@ -518,6 +559,8 @@ def _segment_label_rows(
     )
     if horizon_days is not None:
         multi = multi.filter(MultiHorizonOutcome.horizon_days == horizon_days)
+    if model_version is not None:
+        multi = multi.filter(Prediction.model_version == model_version)
 
     multi_rows = [
         (direction, _target_label(benchmark_label, label))
@@ -535,12 +578,12 @@ def _segment_label_rows(
             Event.event_type == event_type,
             Outcome.benchmark_label.isnot(None) | Outcome.label.isnot(None),
         )
-        .limit(100)
-        .all()
     )
+    if model_version is not None:
+        single = single.filter(Prediction.model_version == model_version)
     return [
         (direction, _target_label(benchmark_label, label))
-        for direction, benchmark_label, label in single
+        for direction, benchmark_label, label in single.limit(100).all()
     ]
 
 

@@ -17,6 +17,7 @@ from app.services.feature_service import (
     build_derived_features,
     build_event_features,
     build_market_features,
+    build_news_signal_features,
     sector_sensitivity_for_asset,
     sector_symbols_for_asset,
     sentiment_from_classification,
@@ -52,6 +53,7 @@ def run_prediction_pipeline(
         predictions = _store_predictions_for_assets(
             session,
             persisted_event,
+            article=article,
             symbols=symbols,
             sectors=[str(sector) for sector in effective_classification.get("affected_sectors", [])],
             model_version=model_version,
@@ -151,12 +153,13 @@ def _store_predictions_for_assets(
     db: Session,
     event: Event,
     *,
+    article: dict[str, Any],
     symbols: Iterable[str],
     sectors: list[str],
     model_version: str,
 ) -> list[Prediction]:
     stored: list[Prediction] = []
-    event_features = build_event_features(event)
+    base_event_features = build_event_features(event)
     horizon = prediction_horizon(event.event_type)
 
     try:
@@ -173,6 +176,14 @@ def _store_predictions_for_assets(
             continue
         if _prediction_exists(db, event, symbol, horizon):
             continue
+        event_features = {
+            **base_event_features,
+            **build_news_signal_features(
+                article,
+                symbol=symbol,
+                event_sentiment=float(base_event_features.get("sentiment", 0.0)),
+            ),
+        }
 
         try:
             context = fetch_market_context(symbol)

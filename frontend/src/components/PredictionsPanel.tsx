@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { BrainCircuit, RefreshCw, TrendingDown, TrendingUp } from "lucide-react";
 
-import { fetchPredictions } from "../lib/api";
+import { fetchPredictions, refreshPredictions } from "../lib/api";
 import { directionArrow, directionColor, formatLabel } from "../lib/intelligence";
 import type { PredictionSummary } from "../types";
 
@@ -19,7 +19,11 @@ export function PredictionsPanel() {
     setIsLoading(true);
     setError("");
     try {
-      const payload = await fetchPredictions();
+      let payload = await fetchPredictions();
+      if ((payload.predictions ?? []).length === 0) {
+        await refreshPredictions();
+        payload = await fetchPredictions();
+      }
       setSummary(payload);
       setSelectedIndex(0);
     } catch (err) {
@@ -53,7 +57,7 @@ export function PredictionsPanel() {
 
       {predictions.length === 0 ? (
         <div className="rounded-lg border border-quant-line bg-quant-panel2 p-3 text-sm text-quant-muted">
-          No predictions available yet. Refresh events, then reload predictions.
+          No forward signals are available from the backend yet. Refresh pulls both actionable and blocked signals, so this usually means prediction refresh has not created fresh model rows yet.
         </div>
       ) : (
         <div className="grid gap-3">

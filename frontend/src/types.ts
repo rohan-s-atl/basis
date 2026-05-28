@@ -300,7 +300,8 @@ export type TrainingDataValidation = {
 };
 
 export type ModelHealth = {
-  status: "healthy" | "drift_detected" | "no_model";
+  status: "healthy" | "drift_detected" | "warming_up" | "no_model";
+  status_reason?: string | null;
   rolling_accuracy: { accuracy: number; samples: number; window: number } | null;
   peak_accuracy: number | null;
   trained_accuracy?: number | null;

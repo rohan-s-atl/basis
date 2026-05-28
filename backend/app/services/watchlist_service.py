@@ -52,6 +52,8 @@ def _match_events(symbol: str, events: list[dict]) -> list[dict]:
 
     for event in events:
         event_assets = set(map_article_to_assets(event, event))
+        event_assets.update(str(asset).upper() for asset in event.get("mapped_assets", []) if str(asset).strip())
+        event_assets.update(str(asset).upper() for asset in str(event.get("related", "")).replace(",", " ").split() if str(asset).strip())
         event_sectors = set(event.get("affected_sectors", []))
 
         if symbol in event_assets or symbol_sectors.intersection(event_sectors):
@@ -94,4 +96,10 @@ def _build_reason(symbol: str, matched_events: list[dict]) -> str:
     top_event = max(matched_events, key=lambda event: _severity_score(str(event.get("severity", "low"))))
     event_type = str(top_event.get("event_type", "general_market")).replace("_", " ")
     direction = str(top_event.get("impact_direction", "neutral"))
-    return f"{symbol} is exposed to {event_type} events with {direction} market pressure."
+    providers = sorted({
+        str(event.get("provider") or event.get("source") or "").replace("_", " ").title()
+        for event in matched_events
+        if str(event.get("provider") or event.get("source") or "").strip()
+    })
+    provider_text = f" Sources: {', '.join(providers[:3])}." if providers else ""
+    return f"{symbol} is exposed to {event_type} events with {direction} market pressure.{provider_text}"

@@ -45,31 +45,54 @@ _PREDICTION_NOISE_TERMS = {
     "sierra c3500",
     "enduro project",
     "legal framework for direct ocean carbon",
+    "how to bet",
+    "basketball",
+    "nba",
+    "sportsbook",
+    "creators sit behind youtube",
+    "security engineer arrested",
+    "arrested",
+    "interview:",
 }
 
-_PREDICTION_FINANCIAL_TERMS = {
+_STRONG_PREDICTION_FINANCIAL_TERMS = {
     "stock",
     "stocks",
     "shares",
     "earnings",
     "revenue",
-    "inflation",
-    "rate",
-    "rates",
-    "fed",
-    "market",
-    "markets",
-    "investor",
-    "investors",
+    "guidance",
+    "profit",
+    "sales",
+    "beats",
+    "misses",
+    "analyst",
+    "rating",
+    "price target",
     "wall street",
-    "nasdaq",
-    "s&p",
     "treasury",
     "oil",
     "chip",
     "semiconductor",
     "etf",
-    "guidance",
+    "fed",
+}
+
+_PREDICTION_FINANCIAL_TERMS = {
+    *_STRONG_PREDICTION_FINANCIAL_TERMS,
+    "inflation",
+    "rate",
+    "rates",
+    "market",
+    "markets",
+    "investor",
+    "investors",
+    "nasdaq",
+    "s&p",
+    "economy",
+    "economic",
+    "dollar",
+    "yield",
 }
 
 
@@ -216,7 +239,11 @@ def _stored_ml_predictions(
         event = prediction.event
         raw_text = event.raw_text if event is not None else ""
         title = raw_text.splitlines()[0] if raw_text else f"{prediction.asset} prediction"
-        if not _is_prediction_relevant(title, raw_text):
+        if not _is_prediction_relevant(
+            title,
+            raw_text,
+            event.event_type if event is not None else "general_market",
+        ):
             continue
         direction = "positive" if prediction.predicted_direction == "up" else "negative"
         confidence = float(prediction.confidence)
@@ -350,11 +377,19 @@ def _stored_drivers(model_version: str, confidence: float, shap: list[dict]) -> 
     return drivers
 
 
-def _is_prediction_relevant(title: str, raw_text: str) -> bool:
+def _is_prediction_relevant(title: str, raw_text: str, event_type: str) -> bool:
     text = f"{title} {raw_text}".lower()
+    if "stored signal" in text or "weak segment signal" in text:
+        return True
     if any(term in text for term in _PREDICTION_NOISE_TERMS):
         return False
-    return any(term in text for term in _PREDICTION_FINANCIAL_TERMS)
+    strong_hits = sum(1 for term in _STRONG_PREDICTION_FINANCIAL_TERMS if term in text)
+    broad_hits = sum(1 for term in _PREDICTION_FINANCIAL_TERMS if term in text)
+    if event_type == "corporate_earnings":
+        return strong_hits >= 1
+    if event_type in {"inflation", "interest_rate_change", "economic_data", "geopolitical_conflict", "supply_shock"}:
+        return broad_hits >= 1
+    return strong_hits >= 1 or broad_hits >= 2
 
 
 def _driver_label(feature: str) -> str:

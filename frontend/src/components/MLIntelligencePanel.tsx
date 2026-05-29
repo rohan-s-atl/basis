@@ -314,7 +314,7 @@ export function MLIntelligencePanel() {
                 <span className="shrink-0 text-quant-muted">
                   AUC {run.roc_auc !== null ? run.roc_auc.toFixed(3) : "—"}
                 </span>
-                <span className="shrink-0 text-quant-muted">{run.dataset_size}s</span>
+                <span className="shrink-0 text-quant-muted">{run.dataset_size} samples</span>
               </button>
             ))}
           </div>

@@ -1,6 +1,7 @@
 import {
   Activity,
   ArrowLeft,
+  BookOpen,
   BrainCircuit,
   BriefcaseBusiness,
   ChevronRight,
@@ -83,7 +84,8 @@ type Route =
   | { name: "breadth" }
   | { name: "alerts" }
   | { name: "accuracy" }
-  | { name: "data" };
+  | { name: "data" }
+  | { name: "guide" };
 
 type AppData = {
   predictions: PredictionSummary | null;
@@ -112,6 +114,7 @@ const navItems = [
   { route: "#/assets", label: "Assets", icon: LineChart },
   { route: "#/ml", label: "Diagnostics", icon: BrainCircuit },
   { route: "#/data", label: "Data Health", icon: Database },
+  { route: "#/guide", label: "Guide", icon: BookOpen },
 ];
 
 function parseRoute(): Route {
@@ -132,6 +135,7 @@ function parseRoute(): Route {
   if (parts[0] === "alerts") return { name: "alerts" };
   if (parts[0] === "accuracy") return { name: "accuracy" };
   if (parts[0] === "data") return { name: "data" };
+  if (parts[0] === "guide") return { name: "guide" };
   return { name: "overview" };
 }
 
@@ -600,6 +604,7 @@ function PageRenderer({
   if (route.name === "alerts") return <AlertsPage alerts={alerts} />;
   if (route.name === "accuracy") return <AccuracyPage />;
   if (route.name === "data") return <DataHealthPage appData={appData} events={allEvents} />;
+  if (route.name === "guide") return <GuidePage />;
   return <OverviewPage events={events} assetRows={assetRows} clusters={clusters} appData={appData} />;
 }
 
@@ -1336,6 +1341,8 @@ function PortfolioPage({
 function MLPage({ appData }: { appData: AppData }) {
   const validationIssues = appData.validation?.issues ?? [];
   const stats = appData.trainingStats;
+  const labelCount = stats?.num_samples ?? appData.modelHealth?.dataset_size_at_training ?? null;
+  const liveLabelCount = appData.modelHealth?.rolling_accuracy?.samples ?? 0;
   return (
     <div className="grid gap-5 2xl:grid-cols-[minmax(0,1.1fr)_minmax(440px,0.9fr)]">
       <div>
@@ -1343,9 +1350,12 @@ function MLPage({ appData }: { appData: AppData }) {
           <div className="mb-2 flex items-center justify-between gap-3">
             <div>
               <p className="text-xs font-black uppercase text-quant-yellow">Live model status</p>
-              <p className="mt-1 text-sm text-quant-muted">{formatLabel(appData.modelHealth?.status ?? "pending")} across the active prediction stream.</p>
+              <p className="mt-1 text-sm text-quant-muted">
+                {formatLabel(appData.modelHealth?.status ?? "pending")} across the active prediction stream
+                {liveLabelCount > 0 ? `, with ${liveLabelCount} live labels maturing.` : "."}
+              </p>
             </div>
-            <strong className="text-lg font-black text-quant-yellow">{stats?.num_samples ?? "--"} labels</strong>
+            <strong className="text-lg font-black text-quant-yellow">{labelCount === null ? "Loading labels" : `${labelCount} labels`}</strong>
           </div>
         </section>
         <MLIntelligencePanel />
@@ -1371,7 +1381,7 @@ function MLPage({ appData }: { appData: AppData }) {
                   <strong className="text-quant-text">{((run.deployment_accuracy ?? run.calibrated_accuracy ?? run.accuracy) * 100).toFixed(1)}%</strong>
                   <span className="text-xs font-bold uppercase text-quant-muted">{run.triggered_by}</span>
                 </div>
-                <p className="text-xs text-quant-muted">{run.dataset_size}s | AUC {run.roc_auc?.toFixed(3) ?? "n/a"}</p>
+                <p className="text-xs text-quant-muted">{run.dataset_size} samples | AUC {run.roc_auc?.toFixed(3) ?? "n/a"}</p>
               </button>
             ))}
           </div>
@@ -1420,6 +1430,109 @@ function AccuracyPage() {
   return (
     <div className="max-w-4xl">
       <SignalAccuracy />
+    </div>
+  );
+}
+
+function GuidePage() {
+  const cards = [
+    {
+      title: "Command",
+      route: "#/",
+      purpose: "Your opening read: top signal, signal queue, macro pulse, and model readiness.",
+      use: "Start here when you want the market story in one scan.",
+      watch: "Actionable signals first; blocked signals are useful context, not trade prompts.",
+    },
+    {
+      title: "Signals",
+      route: "#/predictions",
+      purpose: "Ranked forecasts with direction, expected move, excess return, confidence, and gate status.",
+      use: "Filter to actionable when you want cleaner ideas; include weak signals when researching model behavior.",
+      watch: "The best signals are current-model rows with clear event links and no gate reason.",
+    },
+    {
+      title: "Holdings",
+      route: "#/portfolio",
+      purpose: "Enter tickers you own and Basis explains exposure, catalysts, risk score, and portfolio-level pressure.",
+      use: "Update your watchlist, wait for the cards to fill, then open a holding for its detail view.",
+      watch: "A high risk score means many relevant catalysts or negative pressure, not automatic sell advice.",
+    },
+    {
+      title: "Market Feed",
+      route: "#/events",
+      purpose: "The source layer: classified articles from Finnhub, Alpha Vantage, Marketaux, and existing feeds.",
+      use: "Search by ticker, event type, sector, or theme to see what is driving the system.",
+      watch: "Strong articles are recent, ticker-relevant, and repeated across providers.",
+    },
+    {
+      title: "Assets",
+      route: "#/assets",
+      purpose: "Shows which tickers or ETF proxies are absorbing the most mapped event pressure.",
+      use: "Use this to understand why QQQ, SPY, XLK, energy, or your holdings are showing up.",
+      watch: "ETF dominance is normal while the model uses macro proxies for broad events.",
+    },
+    {
+      title: "Diagnostics",
+      route: "#/ml",
+      purpose: "Active model health, current-model evaluation, drift, calibration, and training history.",
+      use: "Check this before trusting a signal spike or after retraining.",
+      watch: "Warming up means live labels are still thin; the model can work while health confidence matures.",
+    },
+    {
+      title: "Data Health",
+      route: "#/data",
+      purpose: "Operational readiness: labels, feature count, validation warnings, and outcome coverage.",
+      use: "Use this when something looks off or before a retrain.",
+      watch: "Constant feature warnings usually improve as more market regimes and events arrive.",
+    },
+  ];
+
+  return (
+    <div className="grid gap-5">
+      <section className="quant-panel p-5">
+        <p className="quant-eyebrow">How to use Basis</p>
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(360px,0.55fr)]">
+          <div>
+            <h3 className="mb-3 text-3xl font-black text-quant-text">A clean workflow for investor decisions</h3>
+            <p className="max-w-3xl text-sm leading-6 text-quant-muted">
+              Basis turns news into market events, maps those events to assets, scores forward signals, then labels outcomes as prices move. Treat it as a decision layer: review the signal, inspect the source, check your holdings, then use diagnostics to judge model readiness.
+            </p>
+          </div>
+          <div className="grid gap-2 rounded-lg border border-quant-line bg-quant-panel2 p-3">
+            <ProcessStep label="1. Start with Command" detail="Read the top signal and what deserves attention." />
+            <ProcessStep label="2. Open Signals" detail="Separate actionable ideas from blocked watch items." />
+            <ProcessStep label="3. Check Holdings" detail="See whether your tickers are exposed to the current event set." />
+            <ProcessStep label="4. Verify Diagnostics" detail="Use model health and data warnings as trust controls." />
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+        {cards.map((card) => (
+          <button key={card.title} onClick={() => go(card.route)} className="quant-panel p-4 text-left transition hover:-translate-y-0.5 hover:border-quant-green/45 hover:shadow-lg">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <p className="quant-eyebrow">{card.title}</p>
+                <h4 className="text-xl font-black text-quant-text">{card.purpose}</h4>
+              </div>
+              <ChevronRight className="shrink-0 text-quant-muted" size={18} />
+            </div>
+            <div className="grid gap-2">
+              <GuideNote label="Use it for" value={card.use} />
+              <GuideNote label="Read it as" value={card.watch} />
+            </div>
+          </button>
+        ))}
+      </section>
+    </div>
+  );
+}
+
+function GuideNote({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-quant-line bg-white/45 p-3">
+      <p className="mb-1 text-[0.65rem] font-black uppercase text-quant-muted">{label}</p>
+      <p className="text-sm leading-5 text-quant-muted">{value}</p>
     </div>
   );
 }
@@ -1723,6 +1836,7 @@ function breadcrumbItems(route: Route): Array<{ label: string; href?: string }> 
   if (route.name === "signal") return [{ label: "Portfolio", href: "#/portfolio" }, { label: "Signal" }];
   if (route.name === "ml") return [{ label: "Model" }];
   if (route.name === "data") return [{ label: "System Health" }];
+  if (route.name === "guide") return [{ label: "Guide" }];
   return [{ label: pageTitle(route) }];
 }
 
@@ -2546,6 +2660,7 @@ function pageTitle(route: Route): string {
   if (route.name === "alerts") return "Alerts";
   if (route.name === "accuracy") return "Accuracy";
   if (route.name === "data") return "System Health";
+  if (route.name === "guide") return "Guide";
   return "Command";
 }
 
@@ -2553,6 +2668,7 @@ function pageEyebrow(route: Route): string {
   if (route.name === "overview") return "Basis";
   if (route.name === "event" || route.name === "asset" || route.name === "prediction") return "Drilldown";
   if (route.name === "data") return "Operations";
+  if (route.name === "guide") return "Support";
   return "Workspace";
 }
 

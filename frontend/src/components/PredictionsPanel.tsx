@@ -55,7 +55,21 @@ export function PredictionsPanel() {
         </div>
       )}
 
-      {predictions.length === 0 ? (
+      {isLoading && !summary ? (
+        <div className="rounded-lg border border-quant-line bg-quant-panel2 p-3">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-xs font-black uppercase text-quant-muted">Loading forward signals</p>
+            <RefreshCw size={13} className="animate-spin text-quant-green" />
+          </div>
+          <div className="grid gap-2">
+            {[0, 1, 2].map((index) => (
+              <div key={index} className="h-12 overflow-hidden rounded-md bg-quant-bg">
+                <div className="loading-rail h-full w-1/2 bg-white/60" style={{ animationDelay: `${index * 120}ms` }} />
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : predictions.length === 0 ? (
         <div className="rounded-lg border border-quant-line bg-quant-panel2 p-3 text-sm text-quant-muted">
           No forward signals are available from the backend yet. Refresh pulls both actionable and blocked signals, so this usually means prediction refresh has not created fresh model rows yet.
         </div>

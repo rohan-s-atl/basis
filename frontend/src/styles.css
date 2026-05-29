@@ -11,7 +11,6 @@
       "Segoe UI", sans-serif;
     font-synthesis: none;
     text-rendering: optimizeLegibility;
-    /* ~81% of 16px default → matches ~80% Chrome zoom density */
     font-size: 14px;
   }
 

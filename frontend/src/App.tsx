@@ -588,7 +588,7 @@ function PageRenderer({
   if (route.name === "events") return <EventsPage events={events} allEvents={allEvents} isLoading={isLoading} filters={filters} />;
   if (route.name === "event") return <EventDetailPage event={allEvents.find((event) => eventKey(event) === route.id) ?? events[0] ?? null} allEvents={allEvents} predictions={appData.predictions} quotes={quotes} />;
   if (route.name === "assets") return <AssetsPage rows={assetRows} quotes={quotes} events={events} predictions={appData.predictions} />;
-  if (route.name === "asset") return <AssetDetailPage symbol={route.symbol} rows={assetRows} quotes={quotes} events={allEvents} predictions={appData.predictions} backtest={appData.backtest} />;
+  if (route.name === "asset") return <AssetDetailPage symbol={route.symbol} rows={assetRows} quotes={quotes} events={allEvents} predictions={appData.predictions} backtest={appData.backtest} holdingSymbols={holdingSymbols} />;
   if (route.name === "predictions") return <PredictionsPage summary={appData.predictions} />;
   if (route.name === "prediction") return <PredictionDetailPage summary={appData.predictions} index={route.index} marketRegime={appData.marketRegime} allPredictions={appData.predictions} />;
   if (route.name === "portfolio") return <PortfolioPage appData={appData} events={allEvents} quotes={quotes} holdingsText={holdingsText} holdingSymbols={holdingSymbols} onHoldingsChange={onHoldingsChange} />;
@@ -619,11 +619,12 @@ function OverviewPage({
   const actionable = signals.filter((signal) => signal.actionability === "actionable" || signal.is_actionable);
   const watched = signals.filter((signal) => signal.actionability === "watch");
   const blocked = signals.filter((signal) => signal.actionability === "blocked" || (!signal.is_actionable && signal.actionability !== "watch"));
-  const leadSignal = actionable[0] ?? signals[0] ?? null;
+  const attentionSignals = [...actionable, ...watched];
+  const leadSignal = attentionSignals[0] ?? signals[0] ?? null;
   return (
     <div className="grid gap-5">
       <section className="quant-panel-strong overflow-hidden p-5 lg:p-7">
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
+        <div className="grid items-center gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.55fr)]">
           <div>
             <p className="quant-eyebrow mb-3">Market decision layer</p>
             <h2 className="max-w-4xl text-4xl font-black leading-tight text-quant-text md:text-5xl">
@@ -640,9 +641,11 @@ function OverviewPage({
               <button onClick={() => go("#/events")} className="quant-button">Open market feed</button>
             </div>
           </div>
-          <div className="rounded-lg border border-quant-line bg-white/45 p-4 backdrop-blur-2xl">
+          <div className="flex justify-center rounded-lg border border-quant-line bg-white/45 p-4 backdrop-blur-2xl">
             {leadSignal ? (
-              <SignalBriefCard prediction={leadSignal} index={signals.indexOf(leadSignal)} featured />
+              <div className="w-full max-w-md">
+                <SignalBriefCard prediction={leadSignal} index={signals.indexOf(leadSignal)} featured />
+              </div>
             ) : (
               <InlineEmpty title="No signals loaded" description="Refresh the feed or wait for predictions to populate the command view." />
             )}
@@ -668,8 +671,8 @@ function OverviewPage({
         <div className="grid gap-3 xl:grid-cols-3">
           {signals.length === 0 ? (
             <InlineEmpty title="No predictions yet" description="Signals appear here once Basis has classified events and mapped assets." />
-          ) : signals.slice(0, 6).map((prediction, index) => (
-            <SignalBriefCard key={`${prediction.symbol}-${index}`} prediction={prediction} index={index} />
+          ) : (attentionSignals.length ? attentionSignals : signals).slice(0, 6).map((prediction) => (
+            <SignalBriefCard key={`${prediction.symbol}-${signals.indexOf(prediction)}`} prediction={prediction} index={signals.indexOf(prediction)} />
           ))}
         </div>
       </section>
@@ -986,6 +989,7 @@ function AssetDetailPage({
   events,
   predictions,
   backtest,
+  holdingSymbols,
 }: {
   symbol: string;
   rows: AssetImpactRow[];
@@ -993,23 +997,35 @@ function AssetDetailPage({
   events: EventRecord[];
   predictions: PredictionSummary | null;
   backtest: BacktestSummary | null;
+  holdingSymbols: string[];
 }) {
   const row = rows.find((item) => item.symbol === symbol);
+  const isHolding = holdingSymbols.includes(symbol);
+  const fallbackRow: AssetImpactRow | null = isHolding
+    ? {
+        symbol,
+        direction: "neutral",
+        eventType: "portfolio_holding",
+        confidence: "low",
+        severity: "low",
+      }
+    : null;
+  const displayRow = row ?? fallbackRow;
   const quote = quotes[symbol];
   const linkedEvents = events.filter((event) => getLinkedAssets(event).some((asset) => asset.symbol === symbol));
   const linkedPredictions = predictionsForSymbols(predictions, [symbol]);
   const signalHistory = (backtest?.recent ?? backtest?.top_signals ?? []).filter((signal) => signal.symbol === symbol);
   const accuracy = backtest?.by_symbol?.[symbol]?.accuracy_pct;
-  if (!row) return <EmptyState title={`No asset data for ${symbol}`} action="Back to assets" onClick={() => go("#/assets")} />;
+  if (!displayRow) return <EmptyState title={`No asset data for ${symbol}`} action="Back to assets" onClick={() => go("#/assets")} />;
   return (
     <div className="grid gap-5 xl:grid-cols-[1fr_420px]">
       <section className="quant-panel p-5">
-        <button onClick={() => go("#/assets")} className="mb-4 inline-flex items-center gap-2 text-sm font-bold text-quant-muted hover:text-quant-text"><ArrowLeft size={14} /> Assets</button>
+        <button onClick={() => go(isHolding ? "#/portfolio" : "#/assets")} className="mb-4 inline-flex items-center gap-2 text-sm font-bold text-quant-muted hover:text-quant-text"><ArrowLeft size={14} /> {isHolding ? "Holdings" : "Assets"}</button>
         <div className="mb-5 flex items-start justify-between gap-4">
           <div>
             <p className="quant-eyebrow">Asset Detail</p>
             <h2 className="text-4xl font-black text-quant-text">{symbol}</h2>
-            <p className="mt-1 text-sm text-quant-muted">{formatLabel(row.eventType)} | {row.confidence} confidence</p>
+            <p className="mt-1 text-sm text-quant-muted">{isHolding ? holdingDescription(symbol) : `${formatLabel(displayRow.eventType)} | ${displayRow.confidence} confidence`}</p>
           </div>
           <div className="text-right">
             <p className="text-sm text-quant-muted">Latest</p>
@@ -1018,8 +1034,8 @@ function AssetDetailPage({
         </div>
         <PriceLineChart values={quote?.history ?? []} />
         <div className="mt-4 grid gap-3 md:grid-cols-3">
-          <DetailStat label="Impact" value={row.direction} />
-          <DetailStat label="Signal source" value={formatLabel(row.eventType)} />
+          <DetailStat label="Impact" value={displayRow.direction} />
+          <DetailStat label="Signal source" value={row ? formatLabel(row.eventType) : "Holding watch"} />
           <DetailStat label="Linked events" value={linkedEvents.length.toString()} />
           <DetailStat label="Backtest accuracy" value={typeof accuracy === "number" ? `${accuracy}%` : "Pending"} />
           <DetailStat label="Forecasts" value={linkedPredictions.length.toString()} />
@@ -1084,7 +1100,7 @@ function PredictionsPage({ summary }: { summary: PredictionSummary | null }) {
   const [horizonFilter, setHorizonFilter] = useState("all");
   const [assetFilter, setAssetFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
-  const [actionFilter, setActionFilter] = useState("all");
+  const [actionFilter, setActionFilter] = useState("actionable");
   if (!summary) return <PredictionsPanel />;
   const assets = uniqueValues(summary.predictions.map((prediction) => prediction.symbol));
   const horizons = uniqueValues(summary.predictions.map((prediction) => prediction.horizon));
@@ -1779,19 +1795,25 @@ function HoldingsWorkspace({
   regime: MarketRegime | null;
 }) {
   const [serverImpact, setServerImpact] = useState<WatchlistImpact | null>(null);
+  const [isImpactLoading, setIsImpactLoading] = useState(false);
 
   useEffect(() => {
     let active = true;
     if (holdingSymbols.length === 0) {
       setServerImpact(null);
+      setIsImpactLoading(false);
       return;
     }
+    setIsImpactLoading(true);
     fetchWatchlistImpact(holdingSymbols)
       .then((impact) => {
         if (active) setServerImpact(impact);
       })
       .catch(() => {
         if (active) setServerImpact(null);
+      })
+      .finally(() => {
+        if (active) setIsImpactLoading(false);
       });
     return () => {
       active = false;
@@ -1848,8 +1870,8 @@ function HoldingsWorkspace({
           <p className="mt-1 text-sm text-quant-muted">Enter symbols you own to see related events, forecasts, and current market context.</p>
         </div>
         <div className="grid grid-cols-3 gap-2 text-right">
-          <DetailStat label="Coverage" value={`${covered}/${holdingSymbols.length || 0}`} />
-          <DetailStat label="Risk score" value={holdingSymbols.length ? portfolioRisk.toString() : "--"} />
+          <DetailStat label="Coverage" value={isImpactLoading ? "..." : `${covered}/${holdingSymbols.length || 0}`} />
+          <DetailStat label="Risk score" value={isImpactLoading ? "..." : holdingSymbols.length ? portfolioRisk.toString() : "--"} />
           <DetailStat label="Regime" value={regime ? regimeName(regime.market_regime_encoded) : "--"} />
         </div>
       </div>
@@ -1864,6 +1886,17 @@ function HoldingsWorkspace({
           Update watchlist
         </button>
       </div>
+      {isImpactLoading && (
+        <div className="mb-4 rounded-lg border border-quant-line bg-white/45 p-3">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <p className="text-xs font-black uppercase text-quant-muted">Updating holdings impact</p>
+            <RefreshCw size={13} className="animate-spin text-quant-green" />
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-quant-bg">
+            <div className="loading-rail h-full w-1/2 rounded-full bg-quant-green" />
+          </div>
+        </div>
+      )}
       <div className="mb-4 grid gap-3 xl:grid-cols-[1.15fr_0.85fr]">
         <section className="rounded-lg border border-quant-line bg-white/45 p-4 backdrop-blur-xl">
           <p className="quant-eyebrow mb-2">Portfolio forecast</p>
@@ -1888,7 +1921,7 @@ function HoldingsWorkspace({
         <section className="rounded-lg border border-quant-line bg-white/45 p-4 backdrop-blur-xl">
           <p className="quant-eyebrow mb-2">What you would normally calculate</p>
           <div className="grid gap-2">
-            <PortfolioCalculation label="Macro concentration" value={`${holdingSymbols.length ? Math.round((covered / holdingSymbols.length) * 100) : 0}%`} detail="Share of holdings currently linked to events or model signals." />
+            <PortfolioCalculation label="Macro concentration" value={isImpactLoading ? "..." : `${holdingSymbols.length ? Math.round((covered / holdingSymbols.length) * 100) : 0}%`} detail="Share of holdings currently linked to events or model signals." />
             <PortfolioCalculation label="Signal balance" value={`${bullish}-${bearish}`} detail="Bullish vs bearish holdings in the current model queue." />
             <PortfolioCalculation label="Market sensitivity" value={regime ? regimeName(regime.market_regime_encoded) : "--"} detail="Current backdrop used to interpret the holding signals." />
           </div>

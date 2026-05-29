@@ -9,20 +9,23 @@ export function MLIntelligencePanel() {
   const [evaluation, setEvaluation] = useState<ModelEvaluation | null>(null);
   const [history, setHistory] = useState<TrainingRun[]>([]);
   const [regime, setRegime] = useState<MarketRegime | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [isRetraining, setIsRetraining] = useState(false);
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
+    setIsLoading(true);
     const [h, hist, r, evalResult] = await Promise.allSettled([
       fetchModelHealth(),
       fetchTrainingHistory(10),
       fetchMarketRegime(),
-      fetchModelEvaluation(),
+      fetchModelEvaluation(true),
     ]);
     if (h.status === "fulfilled") setHealth(h.value);
     if (hist.status === "fulfilled") setHistory(hist.value);
     if (r.status === "fulfilled") setRegime(r.value);
     if (evalResult.status === "fulfilled") setEvaluation(evalResult.value);
+    setIsLoading(false);
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -62,6 +65,8 @@ export function MLIntelligencePanel() {
           {error}
         </div>
       )}
+
+      {isLoading && !health && <SectionLoading title="Loading active model readout" rows={4} />}
 
       {/* Model health */}
       {health && (
@@ -156,10 +161,15 @@ export function MLIntelligencePanel() {
         </div>
       )}
 
+      {isLoading && health && !evaluation && <SectionLoading title="Loading current-model evaluation" rows={3} />}
+
       {evaluation && (
         <div className="mb-2 rounded-lg border border-quant-line bg-quant-panel2 p-3">
           <div className="mb-2 flex items-center justify-between gap-2">
-            <p className="quant-eyebrow">Evaluation</p>
+            <div>
+              <p className="quant-eyebrow">Active-model evaluation</p>
+              <p className="text-[0.68rem] text-quant-muted">Current deployed model only</p>
+            </div>
             <span className="text-[0.65rem] text-quant-muted">{evaluation.sample_count} labeled samples</span>
           </div>
 
@@ -311,12 +321,30 @@ export function MLIntelligencePanel() {
         </div>
       )}
 
-      {!health && !regime && history.length === 0 && (
+      {!isLoading && !health && !regime && history.length === 0 && (
         <div className="rounded-lg border border-quant-line bg-quant-panel2 p-3 text-sm text-quant-muted">
           No model data yet. Train a model to begin tracking performance.
         </div>
       )}
     </section>
+  );
+}
+
+function SectionLoading({ title, rows = 3 }: { title: string; rows?: number }) {
+  return (
+    <div className="mb-2 rounded-lg border border-quant-line bg-quant-panel2 p-3">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <p className="text-xs font-black uppercase text-quant-muted">{title}</p>
+        <RefreshCw size={13} className="animate-spin text-quant-green" />
+      </div>
+      <div className="grid gap-2">
+        {Array.from({ length: rows }).map((_, index) => (
+          <div key={index} className="h-9 overflow-hidden rounded-md bg-quant-bg">
+            <div className="loading-rail h-full w-1/2 bg-white/60" style={{ animationDelay: `${index * 100}ms` }} />
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 

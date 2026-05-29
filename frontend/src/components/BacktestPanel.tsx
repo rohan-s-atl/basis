@@ -8,6 +8,7 @@ import type { BacktestSummary, PortfolioSimulation } from "../types";
 export function BacktestPanel() {
   const [summary, setSummary] = useState<BacktestSummary | null>(null);
   const [portfolio, setPortfolio] = useState<PortfolioSimulation | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState("");
 
@@ -17,7 +18,8 @@ export function BacktestPanel() {
         setSummary(nextSummary);
         setPortfolio(nextPortfolio);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setIsLoading(false));
   }, []);
 
   async function handleRun() {
@@ -56,11 +58,27 @@ export function BacktestPanel() {
         </div>
       )}
 
-      {!summary || summary.total_signals === 0 ? (
+      {isLoading && (
+        <div className="rounded-lg border border-quant-line bg-quant-panel2 p-3">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <p className="text-xs font-black uppercase text-quant-muted">Loading signal outcomes</p>
+            <BrainCircuit size={14} className="animate-pulse text-quant-green" />
+          </div>
+          <div className="grid gap-2">
+            {[0, 1, 2].map((index) => (
+              <div key={index} className="h-10 overflow-hidden rounded-md bg-quant-bg">
+                <div className="loading-rail h-full w-1/2 bg-white/60" style={{ animationDelay: `${index * 120}ms` }} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {!isLoading && (!summary || summary.total_signals === 0) ? (
         <div className="rounded-lg border border-quant-line bg-quant-panel2 p-3 text-sm text-quant-muted">
           Run the backtest after events are ingested to generate per-asset signal outcomes.
         </div>
-      ) : (
+      ) : !isLoading && summary ? (
         <div className="grid gap-3">
           {portfolio && portfolio.signals > 0 && (
             <div className="rounded-lg border border-quant-line bg-quant-panel2 p-3">
@@ -170,7 +188,7 @@ export function BacktestPanel() {
             </div>
           </div>
         </div>
-      )}
+      ) : null}
     </section>
   );
 }

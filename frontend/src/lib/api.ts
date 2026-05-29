@@ -125,8 +125,9 @@ export async function fetchModelHealth(): Promise<ModelHealth> {
   return payload;
 }
 
-export async function fetchModelEvaluation(): Promise<ModelEvaluation> {
-  const { payload } = await requestJson<ModelEvaluation>("/model-evaluation");
+export async function fetchModelEvaluation(currentOnly = true): Promise<ModelEvaluation> {
+  const params = currentOnly ? "?current_only=true" : "";
+  const { payload } = await requestJson<ModelEvaluation>(`/model-evaluation${params}`);
   return payload;
 }
 

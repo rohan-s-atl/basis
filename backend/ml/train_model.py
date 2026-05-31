@@ -129,7 +129,7 @@ def training_data_from_payload(payload: dict[str, Any]) -> TrainingData:
 # Models
 # ---------------------------------------------------------------------------
 
-def build_xgboost() -> XGBClassifier:
+def build_xgboost(scale_pos_weight: float = 1.0) -> XGBClassifier:
     return XGBClassifier(
         n_estimators=200,
         max_depth=4,
@@ -137,6 +137,7 @@ def build_xgboost() -> XGBClassifier:
         subsample=0.8,
         colsample_bytree=0.8,
         eval_metric="logloss",
+        scale_pos_weight=scale_pos_weight,
         random_state=42,
     )
 
@@ -144,8 +145,16 @@ def build_xgboost() -> XGBClassifier:
 def build_logistic() -> Pipeline:
     return Pipeline([
         ("scaler", StandardScaler()),
-        ("clf", LogisticRegression(max_iter=1000, random_state=42, C=1.0)),
+        ("clf", LogisticRegression(max_iter=1000, random_state=42, C=1.0, class_weight="balanced")),
     ])
+
+
+def _compute_scale_pos_weight(y: pd.Series) -> float:
+    n_neg = int((y == 0).sum())
+    n_pos = int((y == 1).sum())
+    if n_pos == 0:
+        return 1.0
+    return round(n_neg / n_pos, 4)
 
 
 # ---------------------------------------------------------------------------
@@ -168,7 +177,7 @@ def walk_forward_cv(X: pd.DataFrame, y: pd.Series) -> WalkForwardCV:
         X_te, y_te = X.iloc[train_end:test_end], y.iloc[train_end:test_end]
 
         if y_tr.nunique() >= 2 and y_te.nunique() >= 2 and len(y_te) >= MIN_FOLD_SAMPLES:
-            model = build_xgboost()
+            model = build_xgboost(scale_pos_weight=_compute_scale_pos_weight(y_tr))
             model.fit(X_tr, y_tr)
             fold_accuracies.append(float(accuracy_score(y_te, model.predict(X_te))))
 
@@ -244,8 +253,8 @@ def compute_shap_summary(model: XGBClassifier, X: pd.DataFrame) -> list[dict[str
 # Platt calibration
 # ---------------------------------------------------------------------------
 
-def calibrate(X_train: pd.DataFrame, y_train: pd.Series) -> CalibratedClassifierCV:
-    calibrated = CalibratedClassifierCV(build_xgboost(), method="sigmoid", cv=3)
+def calibrate(X_train: pd.DataFrame, y_train: pd.Series, scale_pos_weight: float = 1.0) -> CalibratedClassifierCV:
+    calibrated = CalibratedClassifierCV(build_xgboost(scale_pos_weight=scale_pos_weight), method="sigmoid", cv=3)
     calibrated.fit(X_train, y_train)
     return calibrated
 
@@ -339,7 +348,7 @@ def train_segment_models(data: TrainingData, *, base_dir: Path, min_samples: int
         if int(y_train.value_counts().min()) < 3:
             continue
 
-        model = calibrate(X_train, y_train)
+        model = calibrate(X_train, y_train, scale_pos_weight=_compute_scale_pos_weight(y_train))
         proba = model.predict_proba(X_test)[:, 1]
         threshold = optimize_decision_threshold(y_test, proba)
         pred = (proba >= threshold.threshold).astype(int)
@@ -443,8 +452,11 @@ def train_xgboost_from_data(
     )
     _validate_split(y_train, y_validation, y_test)
 
+    # Compute class weight from training labels to counteract imbalance
+    scale_pos_weight = _compute_scale_pos_weight(y_train)
+
     # Train raw XGBoost
-    xgb = build_xgboost()
+    xgb = build_xgboost(scale_pos_weight=scale_pos_weight)
     xgb.fit(X_train, y_train)
 
     # Walk-forward CV
@@ -457,7 +469,7 @@ def train_xgboost_from_data(
     shap_summary = compute_shap_summary(xgb, X_test if len(X_test) > 0 else X_train)
 
     # Platt calibration — trains fresh XGBoost with 3-fold CV internally for calibration
-    calibrated = calibrate(X_train, y_train)
+    calibrated = calibrate(X_train, y_train, scale_pos_weight=scale_pos_weight)
     cal_metrics = calibration_metrics(xgb, calibrated, X_test, y_test)
 
     # Tune threshold on validation, then report accuracy on untouched test data.

@@ -169,6 +169,9 @@ def _store_predictions_for_assets(
         logger.warning("Regime fetch failed, using defaults: %s", exc)
         regime = {}
     benchmark_price = _current_benchmark_price()
+    loop_start = datetime.now(UTC)
+    recent_macro_cluster_count = _recent_event_count(db, before=loop_start)
+    repeated_event_type_flag = _repeated_event_type_flag(db, event.event_type, before=loop_start)
 
     for raw_symbol in symbols:
         symbol = str(raw_symbol).upper()
@@ -264,6 +267,8 @@ def _store_predictions_for_assets(
             market_regime_encoded=int(regime.get("market_regime_encoded", 1)),
             asset_exposure_sign=float(exposure["sign"]),
             asset_exposure_confidence=float(exposure["confidence"]),
+            recent_macro_cluster_count=recent_macro_cluster_count,
+            repeated_event_type=repeated_event_type_flag,
         )
         if benchmark_price is not None:
             derived_features["benchmark_price"] = benchmark_price
@@ -390,6 +395,23 @@ def _sector_return_features(asset: str, asset_history: list[float]) -> tuple[flo
         average_return_over_histories(histories, periods=5),
         average_return_over_histories(histories, periods=10),
     )
+
+
+def _recent_event_count(db: Session, *, before: datetime, days: int = 7) -> int:
+    from datetime import timedelta
+    cutoff = before - timedelta(days=days)
+    return db.query(Event).filter(Event.timestamp >= cutoff, Event.timestamp < before).count()
+
+
+def _repeated_event_type_flag(db: Session, event_type: str, *, before: datetime, days: int = 7) -> int:
+    from datetime import timedelta
+    cutoff = before - timedelta(days=days)
+    count = (
+        db.query(Event)
+        .filter(Event.event_type == event_type, Event.timestamp >= cutoff, Event.timestamp < before)
+        .count()
+    )
+    return int(count > 0)
 
 
 def _event_asset_avg_return(

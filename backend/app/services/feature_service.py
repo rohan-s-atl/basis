@@ -55,6 +55,12 @@ LEAKY_DERIVED_FEATURES = {
     "event_asset_accuracy",
 }
 
+# Features that were never meaningfully computed and are always constant zero — exclude
+# from the flattened training snapshot so they don't pollute training data from old records.
+EXCLUDED_FLATTENED_FEATURES = frozenset({
+    "event_surprise_magnitude",
+})
+
 _NEWS_PROVIDER_WEIGHTS = {
     "marketaux": 0.82,
     "alpha_vantage": 0.78,
@@ -156,7 +162,6 @@ def build_event_features(event: Event) -> dict[str, float | int]:
         "event_timestamp_unix": int(timestamp.timestamp()),
         "event_day_of_week": int(timestamp.weekday()),
         "event_hour_utc": int(timestamp.hour),
-        "surprise_magnitude": 0.0,
         "text_embedding_norm": 0.0,
         "text_embedding_pos_sim": 0.5,
         "text_embedding_neg_sim": 0.5,
@@ -270,6 +275,8 @@ def build_derived_features(
     market_regime_encoded: int = 1,
     asset_exposure_sign: float = 1.0,
     asset_exposure_confidence: float = 0.5,
+    recent_macro_cluster_count: int = 0,
+    repeated_event_type: int = 0,
 ) -> dict[str, float | int]:
     sentiment = float(event_features.get("sentiment", 0.0))
     severity = float(event_features.get("severity", 0.0))
@@ -294,8 +301,8 @@ def build_derived_features(
         "market_regime_encoded": market_regime_encoded,
         "asset_exposure_sign": round(asset_exposure_sign, 4),
         "asset_exposure_confidence": round(asset_exposure_confidence, 4),
-        "recent_macro_cluster_count": 0,
-        "repeated_event_type": 0,
+        "recent_macro_cluster_count": int(recent_macro_cluster_count),
+        "repeated_event_type": int(repeated_event_type),
         "event_novelty": 1.0,
     }
 
@@ -316,7 +323,10 @@ def flatten_feature_snapshot(
                 continue
             if not isinstance(value, (int, float, bool)):
                 continue
-            flattened[f"{prefix}_{key}"] = _numeric_feature_value(value)
+            flat_key = f"{prefix}_{key}"
+            if flat_key in EXCLUDED_FLATTENED_FEATURES:
+                continue
+            flattened[flat_key] = _numeric_feature_value(value)
     return flattened
 
 

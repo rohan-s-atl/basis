@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, object_session
 from app.core.config import settings
 from app.db.models import Event, FeatureSnapshot, MultiHorizonOutcome, Outcome, Prediction
 from app.db.session import SessionLocal
-from app.services.baseline_scoring import score_baseline_prediction
+from app.services.baseline_scoring import BaselinePrediction, score_baseline_prediction
 from app.services.ml_scorer import score_with_ml_model
 from app.services.event_classifier import classify_event
 from app.services.feature_service import (
@@ -172,6 +172,7 @@ def _store_predictions_for_assets(
     loop_start = datetime.now(UTC)
     recent_macro_cluster_count = _recent_event_count(db, before=loop_start)
     repeated_event_type_flag = _repeated_event_type_flag(db, event.event_type, before=loop_start)
+    base_event_features["surprise_magnitude"] = _event_type_surprise(db, event, before=loop_start)
 
     for raw_symbol in symbols:
         symbol = str(raw_symbol).upper()
@@ -279,6 +280,7 @@ def _store_predictions_for_assets(
             derived_features,
             fallback=baseline,
         )
+        final_prediction = _apply_prediction_confidence_cap(final_prediction, event.event_type, symbol)
 
         prediction = Prediction(
             event_id=event.id,
@@ -394,6 +396,61 @@ def _sector_return_features(asset: str, asset_history: list[float]) -> tuple[flo
     return (
         average_return_over_histories(histories, periods=5),
         average_return_over_histories(histories, periods=10),
+    )
+
+
+def _event_type_surprise(db: Session, event: Event, *, before: datetime, window: int = 30) -> float:
+    """Sentiment deviation from recent rolling mean for this event type.
+
+    Positive = more bullish than usual; negative = more bearish than usual.
+    Returns 0.0 when fewer than 3 prior events exist (no baseline yet).
+    """
+    from datetime import timedelta
+    cutoff = before - timedelta(days=60)
+    rows = (
+        db.query(Event.sentiment)
+        .filter(
+            Event.event_type == event.event_type,
+            Event.timestamp >= cutoff,
+            Event.timestamp < before,
+        )
+        .order_by(Event.timestamp.desc())
+        .limit(window)
+        .all()
+    )
+    if len(rows) < 3:
+        return 0.0
+    sentiments = [float(s) for (s,) in rows]
+    mean_sentiment = sum(sentiments) / len(sentiments)
+    return round(float(event.sentiment) - mean_sentiment, 4)
+
+
+# Confidence caps for event types and assets with historically poor calibration.
+# Geopolitical events: high-confidence predictions were systematically wrong (14.7% accuracy at 0.8+).
+# XLF: financial sector accuracy 25.2% across all model versions — too noisy to trust at high confidence.
+_EVENT_TYPE_CONFIDENCE_CAPS: dict[str, float] = {
+    "geopolitical_conflict": 0.65,
+}
+_ASSET_CONFIDENCE_CAPS: dict[str, float] = {
+    "XLF": 0.60,
+}
+
+
+def _apply_prediction_confidence_cap(
+    prediction: BaselinePrediction,
+    event_type: str,
+    asset: str,
+) -> BaselinePrediction:
+    cap = min(
+        _EVENT_TYPE_CONFIDENCE_CAPS.get(event_type, 1.0),
+        _ASSET_CONFIDENCE_CAPS.get(asset.upper(), 1.0),
+    )
+    if prediction.confidence <= cap:
+        return prediction
+    return BaselinePrediction(
+        predicted_direction=prediction.predicted_direction,
+        confidence=round(cap, 4),
+        score=prediction.score,
     )
 
 

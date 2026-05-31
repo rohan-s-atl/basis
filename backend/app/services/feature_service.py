@@ -55,10 +55,13 @@ LEAKY_DERIVED_FEATURES = {
     "event_asset_accuracy",
 }
 
-# Features that were never meaningfully computed and are always constant zero — exclude
-# from the flattened training snapshot so they don't pollute training data from old records.
+# Features excluded from the flattened training snapshot.
+# event_event_timestamp_unix: raw unix timestamp leaks market regime over time (temporal memorization).
+# derived_benchmark_price: SPY absolute price level encodes the same regime signal.
+# Both cause the walk-forward CV to overfit on time-window patterns that don't generalize.
 EXCLUDED_FLATTENED_FEATURES = frozenset({
-    "event_surprise_magnitude",
+    "event_event_timestamp_unix",
+    "derived_benchmark_price",
 })
 
 _NEWS_PROVIDER_WEIGHTS = {

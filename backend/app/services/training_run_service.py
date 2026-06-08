@@ -239,27 +239,40 @@ def _confidence_distribution_drift(
             "model_version": model_version or "all",
         }
 
-    training_confidences = [
-        float(confidence)
-        for (confidence,) in (
-            _apply_model_version_filter(db.query(Prediction.confidence), model_version)
-            .join(Outcome, Outcome.prediction_id == Prediction.id)
-            .filter(
-                Outcome.filtered_label.isnot(None),
-                Prediction.timestamp <= latest.trained_at,
-            )
-            .all()
-        )
-    ]
-    recent_confidences = [
-        float(confidence)
-        for (confidence,) in (
-            _apply_model_version_filter(db.query(Prediction.confidence), model_version)
-            .order_by(Prediction.timestamp.desc())
-            .limit(_CONFIDENCE_DRIFT_WINDOW)
-            .all()
-        )
-    ]
+    # Only compare predictions made AFTER the latest training run.
+    # Pre-training predictions come from earlier model behaviour; comparing them
+    # to post-training output conflates intentional model improvement with
+    # feature drift and produces false positives every time the model is retrained.
+    post_training_rows = (
+        _apply_model_version_filter(db.query(Prediction.confidence), model_version)
+        .filter(Prediction.timestamp > latest.trained_at)
+        .order_by(Prediction.timestamp.asc())
+        .all()
+    )
+    post_confidences = [float(c) for (c,) in post_training_rows]
+
+    # Require enough post-training predictions to form a stable baseline and a
+    # recent window.  Until then, the model is in a "warming up" phase.
+    _MIN_POST_TRAINING = 40
+    if len(post_confidences) < _MIN_POST_TRAINING:
+        return {
+            "drift_detected": False,
+            "psi": 0.0,
+            "threshold": _CONFIDENCE_DRIFT_THRESHOLD,
+            "training": [],
+            "recent": [],
+            "samples": len(post_confidences),
+            "training_samples": 0,
+            "reliable": False,
+            "reason": "warming up — waiting for post-training predictions to accumulate",
+            "model_version": model_version or "all",
+        }
+
+    # Split post-training predictions into an early-deployment baseline (first half)
+    # and a recent window (last CONFIDENCE_DRIFT_WINDOW predictions).
+    mid = len(post_confidences) // 2
+    training_confidences = post_confidences[:mid]
+    recent_confidences = post_confidences[-_CONFIDENCE_DRIFT_WINDOW:]
 
     enough_samples = len(training_confidences) >= 20 and len(recent_confidences) >= 20
     training_dist = _confidence_distribution(training_confidences)
@@ -275,7 +288,7 @@ def _confidence_distribution_drift(
         "samples": len(recent_confidences),
         "training_samples": len(training_confidences),
         "reliable": enough_samples,
-        "reason": None if enough_samples else "insufficient current-model history",
+        "reason": None if enough_samples else "insufficient post-training predictions",
         "model_version": model_version or "all",
     }
 

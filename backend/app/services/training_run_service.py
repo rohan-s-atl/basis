@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 AUTO_RETRAIN_MIN_GROWTH = 25
 _DRIFT_WINDOW = 30
 _MIN_HEALTH_SAMPLES = 30
-_DRIFT_THRESHOLD = 0.10  # 10 percentage-point drop from peak triggers drift alert
+_DRIFT_THRESHOLD = 0.20  # 20 percentage-point drop from peak triggers drift alert
 _CONFIDENCE_DRIFT_WINDOW = 50
 _CONFIDENCE_DRIFT_THRESHOLD = 0.20
 _CONFIDENCE_BUCKETS = (0.6, 0.7, 0.8)
@@ -98,7 +98,11 @@ def should_auto_retrain(db: Session, current_dataset_size: int) -> bool:
 def get_model_health(db: Session) -> dict[str, Any]:
     latest = get_latest_run(db)
     active_model_version = _active_prediction_model_version(db)
-    rolling = _rolling_accuracy(db, window=_DRIFT_WINDOW, model_version=active_model_version)
+    # Only measure live accuracy against predictions made after the latest training run.
+    # Pre-retrain predictions were scored by an earlier model and are not comparable
+    # to the current model's training accuracy.
+    after_ts = latest.trained_at if latest is not None else None
+    rolling = _rolling_accuracy(db, window=_DRIFT_WINDOW, model_version=active_model_version, after_timestamp=after_ts)
     confidence_drift = _confidence_distribution_drift(db, latest, model_version=active_model_version)
 
     if latest is None:
@@ -163,18 +167,24 @@ def _rolling_accuracy(
     *,
     window: int,
     model_version: str | None = None,
+    after_timestamp=None,
 ) -> dict[str, Any] | None:
+    def _ts_filter(q):
+        q = _apply_model_version_filter(q, model_version)
+        if after_timestamp is not None:
+            q = q.filter(Prediction.timestamp > after_timestamp)
+        return q
+
     multi_rows = [
         (timestamp, _direction_matches_label(direction, _target_label(benchmark_label, label)))
         for timestamp, direction, benchmark_label, label in (
-            _apply_model_version_filter(
+            _ts_filter(
                 db.query(
                 Prediction.timestamp,
                 Prediction.predicted_direction,
                 MultiHorizonOutcome.benchmark_label,
                 MultiHorizonOutcome.label,
-                ),
-                model_version,
+                )
             )
             .join(MultiHorizonOutcome, MultiHorizonOutcome.prediction_id == Prediction.id)
             .filter(MultiHorizonOutcome.benchmark_label.isnot(None) | MultiHorizonOutcome.label.isnot(None))
@@ -193,9 +203,8 @@ def _rolling_accuracy(
     single_rows = [
         (timestamp, _direction_matches_label(direction, _target_label(benchmark_label, label)))
         for timestamp, direction, benchmark_label, label in (
-            _apply_model_version_filter(
-                db.query(Prediction.timestamp, Prediction.predicted_direction, Outcome.benchmark_label, Outcome.label),
-                model_version,
+            _ts_filter(
+                db.query(Prediction.timestamp, Prediction.predicted_direction, Outcome.benchmark_label, Outcome.label)
             )
             .join(Outcome, Outcome.prediction_id == Prediction.id)
             .filter(

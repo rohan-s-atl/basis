@@ -14,7 +14,7 @@ import requests
 import shap
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, brier_score_loss, classification_report, roc_auc_score
+from sklearn.metrics import accuracy_score, balanced_accuracy_score, brier_score_loss, classification_report, roc_auc_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from xgboost import XGBClassifier
@@ -132,10 +132,12 @@ def training_data_from_payload(payload: dict[str, Any]) -> TrainingData:
 def build_xgboost(scale_pos_weight: float = 1.0) -> XGBClassifier:
     return XGBClassifier(
         n_estimators=200,
-        max_depth=4,
+        max_depth=3,          # shallower trees generalise better on ~3k effective samples
         learning_rate=0.05,
         subsample=0.8,
         colsample_bytree=0.8,
+        min_child_weight=3,   # require ≥3 samples per leaf; prevents noisy micro-splits
+        reg_alpha=0.1,        # L1 regularisation to suppress low-signal features
         eval_metric="logloss",
         scale_pos_weight=scale_pos_weight,
         random_state=42,
@@ -155,6 +157,23 @@ def _compute_scale_pos_weight(y: pd.Series) -> float:
     if n_pos == 0:
         return 1.0
     return round(n_neg / n_pos, 4)
+
+
+# Exponential recency weighting: training samples decay with a half-life of this many rows.
+# With ~3 k deduplicated training samples this means data from ~18 months ago gets roughly
+# half the gradient weight of the most recent month, so regime shifts propagate quickly.
+_RECENCY_HALF_LIFE = 1_000
+
+
+def _sample_weights(n: int) -> np.ndarray:
+    """Return per-sample weights (oldest index 0 → lightest, newest index n-1 → heaviest).
+
+    Weights are normalised so their mean equals 1, preserving the effective sample count
+    for learning-rate and regularisation calculations inside XGBoost.
+    """
+    decay = math.log(2) / _RECENCY_HALF_LIFE
+    weights = np.exp(decay * np.arange(n)).astype(np.float32)
+    return weights / float(weights.mean())
 
 
 # ---------------------------------------------------------------------------
@@ -253,9 +272,17 @@ def compute_shap_summary(model: XGBClassifier, X: pd.DataFrame) -> list[dict[str
 # Platt calibration
 # ---------------------------------------------------------------------------
 
-def calibrate(X_train: pd.DataFrame, y_train: pd.Series, scale_pos_weight: float = 1.0) -> CalibratedClassifierCV:
+def calibrate(
+    X_train: pd.DataFrame,
+    y_train: pd.Series,
+    scale_pos_weight: float = 1.0,
+    sample_weight: np.ndarray | None = None,
+) -> CalibratedClassifierCV:
     calibrated = CalibratedClassifierCV(build_xgboost(scale_pos_weight=scale_pos_weight), method="sigmoid", cv=3)
-    calibrated.fit(X_train, y_train)
+    fit_params: dict[str, Any] = {}
+    if sample_weight is not None:
+        fit_params["sample_weight"] = sample_weight
+    calibrated.fit(X_train, y_train, **fit_params)
     return calibrated
 
 
@@ -302,7 +329,10 @@ def optimize_decision_threshold(
     default_pred = (positive_probabilities >= 0.5).astype(int)
     default_accuracy = float(accuracy_score(y_true, default_pred))
     best_threshold = 0.5
-    best_accuracy = default_accuracy
+    # Use balanced accuracy for the search so the optimiser cannot win by predicting the
+    # majority class exclusively on an imbalanced validation set.  Raw accuracy is still
+    # reported in the result for UI consistency.
+    best_balanced = float(balanced_accuracy_score(y_true, default_pred))
     best_positive_rate = float(default_pred.mean()) if len(default_pred) else 0.0
 
     # Keep the search away from degenerate all-up/all-down cutoffs.
@@ -311,11 +341,14 @@ def optimize_decision_threshold(
         positive_rate = float(pred.mean()) if len(pred) else 0.0
         if positive_rate < 0.05 or positive_rate > 0.95:
             continue
-        acc = float(accuracy_score(y_true, pred))
-        if acc > best_accuracy or (acc == best_accuracy and abs(threshold - 0.5) < abs(best_threshold - 0.5)):
+        bal = float(balanced_accuracy_score(y_true, pred))
+        if bal > best_balanced or (bal == best_balanced and abs(threshold - 0.5) < abs(best_threshold - 0.5)):
             best_threshold = float(threshold)
-            best_accuracy = acc
+            best_balanced = bal
             best_positive_rate = positive_rate
+
+    best_pred = (positive_probabilities >= best_threshold).astype(int)
+    best_accuracy = float(accuracy_score(y_true, best_pred))
 
     return DecisionThreshold(
         threshold=round(best_threshold, 4),
@@ -348,7 +381,12 @@ def train_segment_models(data: TrainingData, *, base_dir: Path, min_samples: int
         if int(y_train.value_counts().min()) < 3:
             continue
 
-        model = calibrate(X_train, y_train, scale_pos_weight=_compute_scale_pos_weight(y_train))
+        seg_weights = _sample_weights(len(X_train))
+        model = calibrate(
+            X_train, y_train,
+            scale_pos_weight=_compute_scale_pos_weight(y_train),
+            sample_weight=seg_weights,
+        )
         proba = model.predict_proba(X_test)[:, 1]
         threshold = optimize_decision_threshold(y_test, proba)
         pred = (proba >= threshold.threshold).astype(int)
@@ -365,6 +403,81 @@ def train_segment_models(data: TrainingData, *, base_dir: Path, min_samples: int
                 samples=len(y_segment),
                 accuracy=round(float(accuracy_score(y_test, pred)), 4),
                 roc_auc=round(_safe_roc_auc(y_test, proba), 4) if _safe_roc_auc(y_test, proba) is not None else None,
+                threshold=threshold.threshold,
+            )
+        )
+
+    return results
+
+
+# Maps the integer encoding produced by feature_service.encode_event_type back to a
+# human-readable slug used as the on-disk directory name for event-type segment models.
+_EVENT_TYPE_NAMES: dict[int, str] = {
+    0: "general_market",
+    1: "geopolitical_conflict",
+    2: "inflation",
+    3: "interest_rate_change",
+    4: "economic_data",
+    5: "corporate_earnings",
+    6: "supply_shock",
+}
+
+
+def train_event_type_segment_models(
+    data: TrainingData,
+    *,
+    base_dir: Path,
+    min_samples: int = 30,
+) -> list[SegmentModelResult]:
+    """Train a calibrated model per event type when the segment is large enough.
+
+    Each model is saved under base_dir/{event_type_encoded}/ alongside its feature
+    names and decision threshold so the scorer can load them independently.
+    """
+    et_feature = "event_event_type_encoded"
+    if et_feature not in data.X.columns:
+        return []
+
+    results: list[SegmentModelResult] = []
+    for et_encoded in sorted({int(v) for v in data.X[et_feature].dropna().tolist()}):
+        mask = data.X[et_feature].astype(int) == et_encoded
+        X_seg = data.X.loc[mask]
+        y_seg = data.y.loc[mask]
+        if len(y_seg) < min_samples or y_seg.nunique() < 2:
+            continue
+
+        split = int(len(X_seg) * 0.8)
+        X_tr, X_te = X_seg.iloc[:split], X_seg.iloc[split:]
+        y_tr, y_te = y_seg.iloc[:split], y_seg.iloc[split:]
+        if y_tr.nunique() < 2 or y_te.empty or y_te.nunique() < 2:
+            continue
+        if int(y_tr.value_counts().min()) < 3:
+            continue
+
+        seg_weights = _sample_weights(len(X_tr))
+        model = calibrate(
+            X_tr, y_tr,
+            scale_pos_weight=_compute_scale_pos_weight(y_tr),
+            sample_weight=seg_weights,
+        )
+        proba = model.predict_proba(X_te)[:, 1]
+        threshold = optimize_decision_threshold(y_te, proba)
+        pred = (proba >= threshold.threshold).astype(int)
+        roc_auc = _safe_roc_auc(y_te, proba)
+
+        et_dir = base_dir / str(et_encoded)
+        et_dir.mkdir(parents=True, exist_ok=True)
+        joblib.dump(model, et_dir / "calibrated_model.pkl")
+        (et_dir / "feature_names.json").write_text(json.dumps(data.feature_names))
+        (et_dir / "decision_threshold.json").write_text(json.dumps(asdict(threshold)))
+
+        et_name = _EVENT_TYPE_NAMES.get(et_encoded, str(et_encoded))
+        results.append(
+            SegmentModelResult(
+                segment=f"et_{et_name}",
+                samples=len(y_seg),
+                accuracy=round(float(accuracy_score(y_te, pred)), 4),
+                roc_auc=round(float(roc_auc), 4) if roc_auc is not None else None,
                 threshold=threshold.threshold,
             )
         )
@@ -455,9 +568,13 @@ def train_xgboost_from_data(
     # Compute class weight from training labels to counteract imbalance
     scale_pos_weight = _compute_scale_pos_weight(y_train)
 
+    # Exponential recency weights: most-recent training samples get higher gradient weight
+    # so the deployed model reflects the current regime more than the distant past.
+    train_weights = _sample_weights(len(X_train))
+
     # Train raw XGBoost
     xgb = build_xgboost(scale_pos_weight=scale_pos_weight)
-    xgb.fit(X_train, y_train)
+    xgb.fit(X_train, y_train, sample_weight=train_weights)
 
     # Walk-forward CV
     cv_result = walk_forward_cv(data.X, data.y)
@@ -469,7 +586,7 @@ def train_xgboost_from_data(
     shap_summary = compute_shap_summary(xgb, X_test if len(X_test) > 0 else X_train)
 
     # Platt calibration — trains fresh XGBoost with 3-fold CV internally for calibration
-    calibrated = calibrate(X_train, y_train, scale_pos_weight=scale_pos_weight)
+    calibrated = calibrate(X_train, y_train, scale_pos_weight=scale_pos_weight, sample_weight=train_weights)
     cal_metrics = calibration_metrics(xgb, calibrated, X_test, y_test)
 
     # Tune threshold on validation, then report accuracy on untouched test data.
@@ -495,7 +612,10 @@ def train_xgboost_from_data(
     joblib.dump(calibrated, out_cal)
     out_names.write_text(json.dumps(data.feature_names))
     out_threshold.write_text(json.dumps(asdict(threshold)))
-    segment_models = train_segment_models(data, base_dir=out_model.parent / "horizons")
+    segment_models = [
+        *train_segment_models(data, base_dir=out_model.parent / "horizons"),
+        *train_event_type_segment_models(data, base_dir=out_model.parent / "event_types"),
+    ]
 
     result = TrainingResult(
         dataset_size=len(data.y),

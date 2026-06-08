@@ -270,6 +270,7 @@ def _store_predictions_for_assets(
             asset_exposure_confidence=float(exposure["confidence"]),
             recent_macro_cluster_count=recent_macro_cluster_count,
             repeated_event_type=repeated_event_type_flag,
+            event_novelty=_event_type_novelty(db, event.event_type, before=prediction_timestamp),
         )
         if benchmark_price is not None:
             derived_features["benchmark_price"] = benchmark_price
@@ -469,6 +470,23 @@ def _repeated_event_type_flag(db: Session, event_type: str, *, before: datetime,
         .count()
     )
     return int(count > 0)
+
+
+def _event_type_novelty(db: Session, event_type: str, *, before: datetime, days: int = 7) -> float:
+    """Smooth novelty score: 1.0 when this event type is novel, decays toward 0 as it repeats.
+
+    Uses a 7-day window — the same window as _repeated_event_type_flag — so the two features
+    are complementary: the flag is binary, this is continuous.
+    Returns 1 / (1 + n_same_type_events_in_window).
+    """
+    from datetime import timedelta
+    cutoff = before - timedelta(days=days)
+    count = (
+        db.query(Event)
+        .filter(Event.event_type == event_type, Event.timestamp >= cutoff, Event.timestamp < before)
+        .count()
+    )
+    return round(1.0 / (1.0 + int(count)), 4)
 
 
 def _event_asset_avg_return(

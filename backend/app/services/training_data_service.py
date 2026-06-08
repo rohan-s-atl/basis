@@ -12,8 +12,13 @@ MIN_RECOMMENDED_DATASET_SIZE = 300
 TARGET_LABEL = "benchmark_relative_direction"
 
 
-def export_training_dataset(db: Session, *, limit: int = 10_000) -> dict[str, Any]:
-    rows = _labeled_training_rows(db, limit=limit, chronological=True)
+def export_training_dataset(
+    db: Session,
+    *,
+    limit: int = 10_000,
+    min_return_magnitude: float = 0.005,
+) -> dict[str, Any]:
+    rows = _labeled_training_rows(db, limit=limit, chronological=True, min_return_magnitude=min_return_magnitude)
     return _dataset_payload(rows)
 
 
@@ -22,8 +27,9 @@ def get_train_test_split(
     *,
     train_fraction: float = 0.8,
     limit: int = 10_000,
+    min_return_magnitude: float = 0.005,
 ) -> dict[str, dict[str, Any]]:
-    rows = _labeled_training_rows(db, limit=limit, chronological=True)
+    rows = _labeled_training_rows(db, limit=limit, chronological=True, min_return_magnitude=min_return_magnitude)
     split_index = int(len(rows) * max(0.0, min(train_fraction, 1.0)))
     train = rows[:split_index]
     test = rows[split_index:]
@@ -109,10 +115,11 @@ def _labeled_training_rows(
     *,
     limit: int,
     chronological: bool,
+    min_return_magnitude: float = 0.0,
 ) -> list[dict[str, Any]]:
     rows = [
-        *_multi_horizon_rows(db, limit=limit, chronological=chronological),
-        *_single_horizon_rows(db, limit=limit, chronological=chronological),
+        *_multi_horizon_rows(db, limit=limit, chronological=chronological, min_return_magnitude=min_return_magnitude),
+        *_single_horizon_rows(db, limit=limit, chronological=chronological, min_return_magnitude=min_return_magnitude),
     ]
     if chronological:
         rows.sort(key=lambda row: row["timestamp"])
@@ -126,6 +133,7 @@ def _single_horizon_rows(
     *,
     limit: int,
     chronological: bool,
+    min_return_magnitude: float = 0.0,
 ) -> list[dict[str, Any]]:
     multi_prediction_ids = _multi_labeled_prediction_ids(db)
     order_column = Prediction.timestamp.asc() if chronological else Outcome.computed_at.desc()
@@ -143,6 +151,8 @@ def _single_horizon_rows(
     )
     dataset: list[dict[str, Any]] = []
     for snapshot, outcome in rows:
+        if abs(outcome.raw_return) < min_return_magnitude:
+            continue
         derived = {
             **snapshot.derived_features,
             "horizon_days": _horizon_days_from_label(snapshot.prediction.horizon),
@@ -166,21 +176,41 @@ def _multi_horizon_rows(
     *,
     limit: int,
     chronological: bool,
+    min_return_magnitude: float = 0.0,
 ) -> list[dict[str, Any]]:
     order_column = (
         Prediction.timestamp.asc() if chronological else MultiHorizonOutcome.computed_at.desc()
     )
+    # Fetch up to 3x limit rows since each prediction can have up to 3 horizon outcomes.
+    # We deduplicate in Python to one row per prediction below.
     rows = (
-        db.query(FeatureSnapshot, MultiHorizonOutcome)
+        db.query(FeatureSnapshot, Prediction, MultiHorizonOutcome)
         .join(Prediction, Prediction.id == FeatureSnapshot.prediction_id)
         .join(MultiHorizonOutcome, MultiHorizonOutcome.prediction_id == Prediction.id)
         .filter(MultiHorizonOutcome.benchmark_label.isnot(None) | MultiHorizonOutcome.label.isnot(None))
         .order_by(order_column)
-        .limit(limit)
+        .limit(limit * 3)
         .all()
     )
+
+    # Group all horizon outcomes by prediction, then pick the single outcome whose
+    # horizon_days is closest to the prediction's stated horizon.  This avoids training
+    # the model on 3 copies of the same feature snapshot with (often contradictory) labels.
+    by_prediction: dict[Any, list[tuple[Any, Any, Any]]] = {}
+    for snapshot, prediction, outcome in rows:
+        by_prediction.setdefault(prediction.id, []).append((snapshot, prediction, outcome))
+
+    sorted_pids = sorted(
+        by_prediction,
+        key=lambda pid: by_prediction[pid][0][1].timestamp,
+        reverse=not chronological,
+    )
+
     dataset: list[dict[str, Any]] = []
-    for snapshot, outcome in rows:
+    for pid in sorted_pids[:limit]:
+        snapshot, prediction, outcome = _pick_horizon(by_prediction[pid])
+        if abs(outcome.raw_return) < min_return_magnitude:
+            continue
         derived = {**snapshot.derived_features, "horizon_days": outcome.horizon_days}
         flattened = flatten_feature_snapshot(
             snapshot.event_features,
@@ -190,10 +220,19 @@ def _multi_horizon_rows(
         dataset.append({
             "features": flattened,
             "label": _target_label(outcome.benchmark_label, outcome.label),
-            "timestamp": snapshot.prediction.timestamp,
+            "timestamp": prediction.timestamp,
             "computed_at": outcome.computed_at,
         })
     return dataset
+
+
+def _pick_horizon(
+    triples: list[tuple[Any, Any, Any]],
+) -> tuple[Any, Any, Any]:
+    """Select the outcome whose horizon_days is closest to the prediction's stated horizon."""
+    _, prediction, _ = triples[0]
+    intended_days = _horizon_days_from_label(prediction.horizon)
+    return min(triples, key=lambda t: abs(t[2].horizon_days - intended_days))
 
 
 def _confidence_label_rows(db: Session) -> list[tuple[float, int]]:
@@ -331,7 +370,10 @@ def _safe_numeric(value: Any) -> float:
 
 
 def _target_label(benchmark_label: int | None, raw_label: int | None) -> int:
-    label = benchmark_label if benchmark_label is not None else raw_label
+    # Prefer absolute direction (raw_label) over benchmark-relative (benchmark_label).
+    # Benchmark-relative labels encode "did asset beat SPY?" which inverts in trending markets
+    # and creates AUC < 0.5 when the test period is strongly correlated with SPY.
+    label = raw_label if raw_label is not None else benchmark_label
     if label is None:
         raise ValueError("training row is missing both benchmark and raw outcome labels")
     return int(label)

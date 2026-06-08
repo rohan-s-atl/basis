@@ -15,6 +15,7 @@ _CALIBRATED_MODEL_PATH = _MODELS_DIR / "calibrated_model.pkl"
 _FEATURE_NAMES_PATH = _MODELS_DIR / "feature_names.json"
 _DECISION_THRESHOLD_PATH = _MODELS_DIR / "decision_threshold.json"
 _HORIZON_MODELS_DIR = _MODELS_DIR / "horizons"
+_EVENT_TYPE_MODELS_DIR = _MODELS_DIR / "event_types"
 
 _cached_raw: XGBClassifier | None = None
 _cached_raw_mtime: float | None = None
@@ -116,6 +117,25 @@ def get_horizon_artifacts(horizon_days: int) -> tuple[object | None, list[str] |
         return model, feature_names, threshold
     except Exception as exc:
         logger.warning("Failed to load %sd horizon model: %s", horizon_days, exc)
+        return None, None, 0.5
+
+
+def get_event_type_artifacts(event_type_encoded: int) -> tuple[object | None, list[str] | None, float]:
+    """Load a calibrated event-type-specific model bundle when training produced one."""
+    et_dir = _EVENT_TYPE_MODELS_DIR / str(int(event_type_encoded))
+    model_path = et_dir / "calibrated_model.pkl"
+    feature_names_path = et_dir / "feature_names.json"
+    threshold_path = et_dir / "decision_threshold.json"
+    if not model_path.exists() or not feature_names_path.exists():
+        return None, None, 0.5
+
+    try:
+        model = joblib.load(model_path)
+        feature_names = json.loads(feature_names_path.read_text())
+        threshold = get_decision_threshold(threshold_path)
+        return model, feature_names, threshold
+    except Exception as exc:
+        logger.warning("Failed to load event_type_%d model: %s", event_type_encoded, exc)
         return None, None, 0.5
 
 

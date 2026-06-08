@@ -48,21 +48,24 @@ def trigger_compute_outcomes(
 @router.get("/export-training-data", response_model=TrainingDataset)
 def export_training_data(
     limit: int = 10_000,
+    min_return_magnitude: float = 0.005,
     db: Session = Depends(get_db),
 ) -> dict:
-    return export_training_dataset(db, limit=min(limit, 50_000))
+    return export_training_dataset(db, limit=min(limit, 50_000), min_return_magnitude=min_return_magnitude)
 
 
 @router.get("/training-data/split")
 def read_train_test_split(
     limit: int = 10_000,
     train_fraction: float = 0.8,
+    min_return_magnitude: float = 0.005,
     db: Session = Depends(get_db),
 ) -> dict:
     return get_train_test_split(
         db,
         train_fraction=train_fraction,
         limit=min(limit, 50_000),
+        min_return_magnitude=min_return_magnitude,
     )
 
 
@@ -118,13 +121,14 @@ def read_model_evaluation(
 @router.post("/train-model")
 def train_model(
     limit: int = 10_000,
+    min_return_magnitude: float = 0.005,
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     from ml.model_store import invalidate_cache
     from ml.train_model import result_to_dict, train_xgboost_from_payload
 
     bounded_limit = min(limit, 50_000)
-    result = train_xgboost_from_payload(export_training_dataset(db, limit=bounded_limit))
+    result = train_xgboost_from_payload(export_training_dataset(db, limit=bounded_limit, min_return_magnitude=min_return_magnitude))
     invalidate_cache()
     payload = result_to_dict(result)
 

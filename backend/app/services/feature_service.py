@@ -58,10 +58,27 @@ LEAKY_DERIVED_FEATURES = {
 # Features excluded from the flattened training snapshot.
 # event_event_timestamp_unix: raw unix timestamp leaks market regime over time (temporal memorization).
 # derived_benchmark_price: SPY absolute price level encodes the same regime signal.
-# Both cause the walk-forward CV to overfit on time-window patterns that don't generalize.
+# market_price: absolute asset price drifts constantly — a stock at $200 today vs $400 in two
+#   years is the same asset.  Percentage returns already capture momentum; the level adds only
+#   covariate shift that causes confidence collapse (PSI spikes) after deployment.
+# market_history_points: data-availability artifact with no directional signal.
+# derived_baseline_score: circular feature — it is a hand-coded linear combination of
+#   event_sentiment, event_severity, and market_rolling_volatility, all of which are
+#   already present as first-class features.  Including it adds a collinear input that
+#   confuses the gradient without adding new signal.
+# derived_event_novelty: hardcoded constant 1.0 in build_derived_features; carries zero
+#   information and wastes a split budget in every tree.
+# event_source_encoded / event_news_provider_encoded: hash sums of source/provider name
+#   strings with no directional meaning.  news_provider_weight already encodes source
+#   quality as a continuous signal; the hash duplicates noise.
 EXCLUDED_FLATTENED_FEATURES = frozenset({
     "event_event_timestamp_unix",
     "derived_benchmark_price",
+    "market_price",
+    "market_history_points",
+    "derived_baseline_score",
+    "event_source_encoded",
+    "event_news_provider_encoded",
 })
 
 _NEWS_PROVIDER_WEIGHTS = {
@@ -250,7 +267,6 @@ def build_market_features(
         "sector_return_10d": round(effective_sector_return_10d, 6),
         "relative_strength_5d": round(return_5d - effective_sector_return_5d, 6),
         "rolling_volatility": round(rolling_volatility, 6),
-        "volatility": round(rolling_volatility, 6),
         "asset_momentum_20d": round(return_20d, 6),
         "asset_beta_to_spy": round(beta_to_spy, 6),
         "volume_ratio": round(volume_ratio, 6),
@@ -280,6 +296,7 @@ def build_derived_features(
     asset_exposure_confidence: float = 0.5,
     recent_macro_cluster_count: int = 0,
     repeated_event_type: int = 0,
+    event_novelty: float = 1.0,
 ) -> dict[str, float | int]:
     sentiment = float(event_features.get("sentiment", 0.0))
     severity = float(event_features.get("severity", 0.0))
@@ -306,7 +323,7 @@ def build_derived_features(
         "asset_exposure_confidence": round(asset_exposure_confidence, 4),
         "recent_macro_cluster_count": int(recent_macro_cluster_count),
         "repeated_event_type": int(repeated_event_type),
-        "event_novelty": 1.0,
+        "event_novelty": round(float(event_novelty), 4),
     }
 
 

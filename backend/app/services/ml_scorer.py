@@ -21,21 +21,35 @@ def score_with_ml_model(
     from ml.model_store import (
         get_calibrated_model,
         get_decision_threshold,
+        get_event_type_artifacts,
         get_feature_names,
         get_horizon_artifacts,
         get_model,
     )
 
     horizon_days = int(float(derived_features.get("horizon_days", 1) or 1))
+    event_type_encoded = int(float(event_features.get("event_type_encoded", 0) or 0))
+
+    et_model, et_feature_names, et_threshold = get_event_type_artifacts(event_type_encoded)
     horizon_model, horizon_feature_names, horizon_threshold = get_horizon_artifacts(horizon_days)
     feature_names = get_feature_names()
     calibrated = get_calibrated_model()
     raw = get_model()
     threshold = get_decision_threshold()
 
-    predictor = horizon_model or calibrated or raw
-    effective_feature_names = horizon_feature_names or feature_names
-    effective_threshold = horizon_threshold if horizon_model is not None else threshold
+    # Priority: event-type-specific → horizon-specific → global calibrated → raw XGBoost
+    if et_model is not None:
+        predictor, effective_feature_names, effective_threshold = et_model, et_feature_names, et_threshold
+        version_suffix = f"et{event_type_encoded}"
+    elif horizon_model is not None:
+        predictor, effective_feature_names, effective_threshold = horizon_model, horizon_feature_names, horizon_threshold
+        version_suffix = f"{horizon_days}d"
+    else:
+        predictor = calibrated or raw
+        effective_feature_names = feature_names
+        effective_threshold = threshold
+        version_suffix = None
+
     if predictor is None or effective_feature_names is None:
         return fallback, BASELINE_MODEL_VERSION
 
@@ -49,7 +63,7 @@ def score_with_ml_model(
         direction: PredictionDirection = "up" if p_up >= effective_threshold else "down"
         confidence = round(max(p_up, 1.0 - p_up), 4)
         score = round(p_up * 2.0 - 1.0, 6)
-        version = f"{ML_MODEL_VERSION}-{horizon_days}d" if horizon_model is not None else ML_MODEL_VERSION
+        version = f"{ML_MODEL_VERSION}-{version_suffix}" if version_suffix else ML_MODEL_VERSION
 
         return BaselinePrediction(
             predicted_direction=direction,

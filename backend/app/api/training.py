@@ -121,7 +121,7 @@ def read_model_evaluation(
 @router.post("/train-model")
 def train_model(
     limit: int = 10_000,
-    min_return_magnitude: float = 0.005,
+    min_return_magnitude: float = 0.0,
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     from ml.model_store import invalidate_cache

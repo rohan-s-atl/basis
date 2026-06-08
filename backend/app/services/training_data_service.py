@@ -151,7 +151,8 @@ def _single_horizon_rows(
     )
     dataset: list[dict[str, Any]] = []
     for snapshot, outcome in rows:
-        if abs(outcome.raw_return) < min_return_magnitude:
+        raw_ret = outcome.raw_return
+        if raw_ret is not None and raw_ret != 0.0 and abs(raw_ret) < min_return_magnitude:
             continue
         derived = {
             **snapshot.derived_features,
@@ -209,7 +210,8 @@ def _multi_horizon_rows(
     dataset: list[dict[str, Any]] = []
     for pid in sorted_pids[:limit]:
         snapshot, prediction, outcome = _pick_horizon(by_prediction[pid])
-        if abs(outcome.raw_return) < min_return_magnitude:
+        raw_ret = outcome.raw_return
+        if raw_ret is not None and raw_ret != 0.0 and abs(raw_ret) < min_return_magnitude:
             continue
         derived = {**snapshot.derived_features, "horizon_days": outcome.horizon_days}
         flattened = flatten_feature_snapshot(
